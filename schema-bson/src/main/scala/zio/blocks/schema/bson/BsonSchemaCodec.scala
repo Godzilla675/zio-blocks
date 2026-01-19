@@ -928,11 +928,14 @@ object BsonSchemaCodec {
 
     private def enumDecoder[Z](config: Config)(schema: Reflect.Variant[Binding, Z]): BsonDecoder[Z] = {
       val cases           = schema.cases
-      val caseNameAliases = aliasesByCaseName(cases)
+      val caseNameAliases = aliasesByCaseName(config)(cases)
 
       if (schema.isEnumeration) {
         val caseMap: Map[String, Z] =
-          cases.map(case_ => case_.name -> case_.value.asInstanceOf[Reflect.Record[Binding, Z]].constructor.construct(Registers(0L), 0)).toMap
+          cases.map { case_ =>
+            caseName(config)(case_) ->
+              case_.value.asInstanceOf[Reflect.Record[Binding, Z]].constructor.construct(Registers(0L), 0)
+          }.toMap
         BsonDecoder.string.mapOrFail(
           s =>
             caseMap.get(caseNameAliases.getOrElse(s, s)) match {
@@ -1012,7 +1015,7 @@ object BsonSchemaCodec {
             case SumTypeHandling.DiscriminatorField(name)  => Set(name)
           })
 
-          val casesIndex = Map(cases.map(c => config.classNameMapping(c.name) -> c): _*)
+          val casesIndex = Map(cases.map(c => caseName(config)(c) -> c): _*)
 
           def getCase(name: String) = casesIndex.get(caseNameAliases.getOrElse(name, name))
 
@@ -1416,7 +1419,9 @@ object BsonSchemaCodec {
       case m: Modifier.alias   => Seq(m.name)
     }.flatten
 
-  private def aliasesByCaseName[A](cases: IndexedSeq[Term[Binding, A, _]]): Map[String, String] =
+  private def aliasesByCaseName[A](config: Config)(
+    cases: IndexedSeq[Term[Binding, A, _]]
+  ): Map[String, String] =
     cases.flatMap { case_ =>
       val aliases = case_.modifiers.collect {
         case a: caseNameAliases => a.aliases.toList
@@ -1425,7 +1430,8 @@ object BsonSchemaCodec {
         case a: Modifier.rename => List(a.name)
         case a: Modifier.alias  => List(a.name)
       }.flatten
-      aliases.map(_ -> case_.name)
+      val mappedName = caseName(config)(case_)
+      aliases.map(_ -> mappedName)
     }.toMap
 
   private def caseName[A](config: Config)(case_ : Term[Binding, A, _]): String = {
