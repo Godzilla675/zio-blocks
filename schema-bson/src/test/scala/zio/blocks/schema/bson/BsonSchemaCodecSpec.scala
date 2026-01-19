@@ -2,11 +2,11 @@ package zio.blocks.schema.bson
 
 import scala.reflect.{ClassTag, classTag}
 
-import org.bson.codecs.configuration.CodecRegistry
-import org.bson.codecs.{Codec => BCodec, DecoderContext, EncoderContext}
+import org.bson.codecs.configuration.{CodecRegistries, CodecRegistry}
+import org.bson.codecs.{BsonValueCodecProvider, Codec => BCodec, CollectionCodecProvider, DecoderContext, DocumentCodecProvider, EncoderContext, IterableCodecProvider, MapCodecProvider, ValueCodecProvider}
 import org.bson.io.BasicOutputBuffer
 import org.bson.types.{Decimal128, ObjectId}
-import org.bson.{Bson, BsonBinaryReader, BsonBinaryWriter, BsonDecimal128, BsonDocument, BsonReader, BsonValue, BsonWriter}
+import org.bson.{BsonBinaryReader, BsonBinaryWriter, BsonDecimal128, BsonDocument, BsonReader, BsonValue, BsonWriter}
 
 import zio.bson.BsonBuilder._
 import zio.bson._
@@ -61,7 +61,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
   case class Customer(id: CustomerId, name: String, age: Int, invitedFriends: List[CustomerId])
 
   object Customer {
-    implicit lazy val customerIdSchema: Schema[CustomerId] = ObjectIdSchema.wrapTotal(CustomerId(_), _.value)
+    implicit lazy val customerIdSchema: Schema[CustomerId] = Schema.derived.wrapTotal(CustomerId(_), _.value)
 
     implicit lazy val customerSchema: Schema[Customer]   = Schema.derived
     implicit lazy val customerCodec: BsonCodec[Customer] = BsonSchemaCodec.bsonCodec(customerSchema)
@@ -88,7 +88,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
   def genRoundedBigDecimal(scale: Int): Gen[Any, BigDecimal] =
     Gen.double.map(d => BigDecimal(d).setScale(scale, BigDecimal.RoundingMode.HALF_UP))
 
-  def spec: Spec[TestEnvironment, Any] = suite("BsonSchemaCodecSpec")(
+  def spec: Spec[TestEnvironment with Scope with Sized, Any] = suite("BsonSchemaCodecSpec")(
     suite("round trip")(
       roundTripTest("SimpleClass")(
         for {
@@ -450,6 +450,15 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
     def get[T](clazz: Class[T], registry: CodecRegistry): BCodec[T] = null
   }
 
+  val defaultCodecRegistry: CodecRegistry = CodecRegistries.fromProviders(
+    new ValueCodecProvider(),
+    new BsonValueCodecProvider(),
+    new DocumentCodecProvider(),
+    new IterableCodecProvider(),
+    new CollectionCodecProvider(),
+    new MapCodecProvider()
+  )
+
   def writeValue[T](value: T, codec: BCodec[T], writer: BsonWriter, isDocument: Boolean): UIO[Unit] =
     ZIO.succeed {
       if (isDocument) codec.encode(writer, value, EncoderContext.builder().build())
@@ -495,7 +504,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
             for {
               buffer        <- ZIO.fromAutoCloseable(ZIO.succeed(new BasicOutputBuffer()))
               writer        <- ZIO.fromAutoCloseable(ZIO.succeed(new BsonBinaryWriter(buffer)))
-              documentCodec = Bson.DEFAULT_CODEC_REGISTRY.get(classOf[BsonDocument])
+              documentCodec = defaultCodecRegistry.get(classOf[BsonDocument])
               codec <- ZIO
                         .succeed(
                           zioBsonCodecProvider[T]
@@ -531,7 +540,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
             for {
               buffer     <- ZIO.fromAutoCloseable(ZIO.succeed(new BasicOutputBuffer()))
               writer     <- ZIO.fromAutoCloseable(ZIO.succeed(new BsonBinaryWriter(buffer)))
-              valueCodec = Bson.DEFAULT_CODEC_REGISTRY.get(bsonValue.getClass).asInstanceOf[BCodec[BsonValue]]
+              valueCodec = defaultCodecRegistry.get(bsonValue.getClass).asInstanceOf[BCodec[BsonValue]]
               codec <- ZIO
                         .succeed(
                           zioBsonCodecProvider[T]
@@ -564,7 +573,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
             for {
               buffer     <- ZIO.fromAutoCloseable(ZIO.succeed(new BasicOutputBuffer()))
               writer     <- ZIO.fromAutoCloseable(ZIO.succeed(new BsonBinaryWriter(buffer)))
-              valueCodec = Bson.DEFAULT_CODEC_REGISTRY.get(bsonValue.getClass).asInstanceOf[BCodec[BsonValue]]
+              valueCodec = defaultCodecRegistry.get(bsonValue.getClass).asInstanceOf[BCodec[BsonValue]]
               codec <- ZIO
                         .succeed(
                           zioBsonCodecProvider[T]
@@ -627,7 +636,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
             buffer     <- ZIO.fromAutoCloseable(ZIO.succeed(new BasicOutputBuffer()))
             writer     <- ZIO.fromAutoCloseable(ZIO.succeed(new BsonBinaryWriter(buffer)))
             bsonValue  = t.toBsonValue
-            valueCodec = Bson.DEFAULT_CODEC_REGISTRY.get(bsonValue.getClass).asInstanceOf[BCodec[BsonValue]]
+            valueCodec = defaultCodecRegistry.get(bsonValue.getClass).asInstanceOf[BCodec[BsonValue]]
             codec <- ZIO
                       .succeed(
                         zioBsonCodecProvider[T]
@@ -644,7 +653,7 @@ object BsonSchemaCodecSpec extends SchemaBaseSpec {
           for {
             buffer        <- ZIO.fromAutoCloseable(ZIO.succeed(new BasicOutputBuffer()))
             writer        <- ZIO.fromAutoCloseable(ZIO.succeed(new BsonBinaryWriter(buffer)))
-            documentCodec = Bson.DEFAULT_CODEC_REGISTRY.get(classOf[BsonDocument])
+            documentCodec = defaultCodecRegistry.get(classOf[BsonDocument])
             codec <- ZIO
                       .succeed(
                         zioBsonCodecProvider[T]

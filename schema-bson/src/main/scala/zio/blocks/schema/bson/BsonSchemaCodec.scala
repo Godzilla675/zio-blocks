@@ -2,7 +2,7 @@ package zio.blocks.schema.bson
 
 import java.time.Instant
 
-import scala.collection.immutable.{HashMap, ListMap}
+import scala.collection.immutable.HashMap
 import scala.jdk.CollectionConverters._
 
 import org.bson.types.ObjectId
@@ -10,11 +10,11 @@ import org.bson.{BsonDocument, BsonElement, BsonNull, BsonReader, BsonType, Bson
 
 import zio.bson.BsonBuilder._
 import zio.bson.DecoderUtils._
-import zio.bson._
+import zio.bson.{BsonCodec, BsonDecoder, BsonEncoder, BsonEncoderOps, BsonFieldDecoder, BsonFieldEncoder, BsonTrace}
 import zio.blocks.schema.annotation._
 import zio.blocks.schema.binding.{Binding, Register, Registers}
 import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveType, PrimitiveValue, Reflect, Schema, Term, TypeName}
-import zio.{Chunk, ChunkBuilder, Unsafe}
+import zio.Chunk
 
 object BsonSchemaCodec {
 
@@ -384,8 +384,6 @@ object BsonSchemaCodec {
 
     private[bson] val CHARSET = java.nio.charset.StandardCharsets.UTF_8
 
-    private def chunkEncoder[A: BsonEncoder]: BsonEncoder[Chunk[A]] = BsonEncoder.iterable[A, Chunk]
-
     private[bson] def schemaEncoder[A](config: Config)(schema: Reflect[Binding, A]): BsonEncoder[A] =
       schema.asPrimitive match {
         case Some(primitive) => primitiveCodec(primitive.primitiveType).encoder
@@ -525,23 +523,6 @@ object BsonSchemaCodec {
 
         override def toBsonValue(value: DynamicValue): BsonValue =
           dynamicValueToBson(value)
-      }
-
-    private def transformEncoder[A, B](config: Config)(schema: Reflect[Binding, A], g: B => Either[String, A]): BsonEncoder[B] =
-      new BsonEncoder[B] {
-        private lazy val innerEncoder = schemaEncoder(config)(schema)
-
-        override def encode(writer: BsonWriter, b: B, ctx: BsonEncoder.EncoderContext): Unit =
-          g(b) match {
-            case Left(_)  => ()
-            case Right(a) => innerEncoder.encode(writer, a, ctx)
-          }
-
-        override def toBsonValue(b: B): BsonValue =
-          g(b) match {
-            case Left(_)  => BsonNull.VALUE
-            case Right(a) => innerEncoder.toBsonValue(a)
-          }
       }
 
     private def enumEncoder[Z](
@@ -689,7 +670,7 @@ object BsonSchemaCodec {
 
       def encode(writer: BsonWriter, value: Z, ctx: BsonEncoder.EncoderContext): Unit =
         if (names.length == 1 && names(0) == ObjectIdTag) {
-          val fieldValue  = fieldValueAt(value, nonTransientFields(0), registers(0))
+          val fieldValue  = fieldValueAt(value, registers(0))
           val id          = new ObjectId(fieldValue.toString)
           writer.writeObjectId(id)
         } else {
@@ -699,7 +680,7 @@ object BsonSchemaCodec {
 
           while (i < len) {
             val tc         = encoders(i)
-            val fieldValue = fieldValueAt(value, nonTransientFields(i), registers(i))
+            val fieldValue = fieldValueAt(value, registers(i))
 
             if (keepNulls || !tc.isAbsent(fieldValue)) {
               writer.writeName(names(i))
@@ -714,12 +695,12 @@ object BsonSchemaCodec {
 
       def toBsonValue(value: Z): BsonValue =
         if (names.length == 1 && names(0) == ObjectIdTag) {
-          val fieldValue = fieldValueAt(value, nonTransientFields(0), registers(0))
+          val fieldValue = fieldValueAt(value, registers(0))
           val id         = new ObjectId(fieldValue.toString)
           id.toBsonValue
         } else {
           val elements = nonTransientFields.indices.view.flatMap { idx =>
-            val fieldValue = fieldValueAt(value, nonTransientFields(idx), registers(idx))
+            val fieldValue = fieldValueAt(value, registers(idx))
             val tc         = encoders(idx)
 
             if (keepNulls || !tc.isAbsent(fieldValue)) Some(element(names(idx), tc.toBsonValue(fieldValue)))
@@ -729,7 +710,7 @@ object BsonSchemaCodec {
           new BsonDocument(elements.asJava)
         }
 
-      private def fieldValueAt(value: Z, field: Term[Binding, Z, _], register: Register[Any]): Any = {
+      private def fieldValueAt(value: Z, register: Register[Any]): Any = {
         val deconstructor = schema.deconstructor
         val registers     = Registers(deconstructor.usedRegisters)
         deconstructor.deconstruct(registers, 0, value)
@@ -767,8 +748,6 @@ object BsonSchemaCodec {
 
     import Codecs._
 
-    private def chunkDecoder[A: BsonDecoder]: BsonDecoder[Chunk[A]] = BsonDecoder.iterableFactory[A, Chunk]
-
     private[bson] def schemaDecoder[A](config: Config)(schema: Reflect[Binding, A]): BsonDecoder[A] =
       schema.asPrimitive match {
         case Some(primitive) => primitiveCodec(primitive.primitiveType).decoder
@@ -801,7 +780,7 @@ object BsonSchemaCodec {
             case _ if schema.isWrapper =>
               wrapperDecoder(config)(schema.asWrapperUnknown.get.wrapper.asInstanceOf[Reflect.Wrapper[Binding, A, Any]])
             case _ if schema.isDynamic =>
-              dynamicDecoder(config)(schema.asDynamic.get).asInstanceOf[BsonDecoder[A]]
+              dynamicDecoder.asInstanceOf[BsonDecoder[A]]
             case _ =>
               throw new Exception(s"Missing a handler for decoding of schema $schema.")
           }
@@ -921,7 +900,7 @@ object BsonSchemaCodec {
         case _ => None
       }
 
-    private def dynamicDecoder(config: Config)(schema: Reflect.Dynamic[Binding]): BsonDecoder[DynamicValue] =
+    private def dynamicDecoder: BsonDecoder[DynamicValue] =
       BsonDecoder.bsonValueDecoder[BsonValue].map(bsonToDynamicValue)
 
     private def enumDecoder[Z](config: Config)(schema: Reflect.Variant[Binding, Z]): BsonDecoder[Z] = {

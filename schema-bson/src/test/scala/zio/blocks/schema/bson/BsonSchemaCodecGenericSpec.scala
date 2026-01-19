@@ -4,6 +4,7 @@ import zio.bson.BsonBuilder._
 import zio.bson._
 import zio.blocks.schema.Schema
 import zio.blocks.schema.bson.BsonSchemaCodecSpec.roundTripTest
+import zio.Scope
 import zio.test._
 
 object BsonSchemaCodecGenericSpec extends zio.blocks.schema.SchemaBaseSpec {
@@ -47,7 +48,7 @@ object BsonSchemaCodecGenericSpec extends zio.blocks.schema.SchemaBaseSpec {
     implicit def codec[T: Schema]: BsonCodec[GenericRec[T]] = BsonSchemaCodec.bsonCodec(schema)
   }
 
-  def spec: Spec[TestEnvironment, Any] = suite("BsonSchemaCodecGenericSpec")(
+  def spec: Spec[TestEnvironment with Scope with Sized, Any] = suite("BsonSchemaCodecGenericSpec")(
     suite("round trip")(
       roundTripTest("SimpleGeneric[String]")(
         for {
