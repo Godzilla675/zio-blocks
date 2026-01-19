@@ -657,7 +657,8 @@ object BsonSchemaCodec {
 
       private val fields = schema.fields
 
-      private val nonTransientFields = fields.filterNot(isTransient).toArray
+      private val fieldIndices = fields.indices.filterNot(idx => isTransient(fields(idx))).toArray
+      private val nonTransientFields = fieldIndices.map(fields(_))
 
       private val names: Array[String] =
         nonTransientFields.map(encodedFieldName)
@@ -665,12 +666,12 @@ object BsonSchemaCodec {
       private lazy val encoders: Array[BsonEncoder[Any]] =
         nonTransientFields.map(s => schemaEncoder(config)(s.value).asInstanceOf[BsonEncoder[Any]])
 
-      private val registers = schema.registers.toArray.asInstanceOf[Array[Register[Any]]]
+      private val registers = fieldIndices.map(schema.registers).asInstanceOf[Array[Register[Any]]]
       private val len       = nonTransientFields.length
 
       def encode(writer: BsonWriter, value: Z, ctx: BsonEncoder.EncoderContext): Unit =
         if (names.length == 1 && names(0) == ObjectIdTag) {
-          val fieldValue  = fieldValueAt(value, registers(0))
+          val fieldValue  = fieldValueAt(value, 0, registers(0))
           val id          = new ObjectId(fieldValue.toString)
           writer.writeObjectId(id)
         } else {
@@ -680,7 +681,7 @@ object BsonSchemaCodec {
 
           while (i < len) {
             val tc         = encoders(i)
-            val fieldValue = fieldValueAt(value, registers(i))
+            val fieldValue = fieldValueAt(value, i, registers(i))
 
             if (keepNulls || !tc.isAbsent(fieldValue)) {
               writer.writeName(names(i))
@@ -695,12 +696,12 @@ object BsonSchemaCodec {
 
       def toBsonValue(value: Z): BsonValue =
         if (names.length == 1 && names(0) == ObjectIdTag) {
-          val fieldValue = fieldValueAt(value, registers(0))
+          val fieldValue = fieldValueAt(value, 0, registers(0))
           val id         = new ObjectId(fieldValue.toString)
           id.toBsonValue
         } else {
           val elements = nonTransientFields.indices.view.flatMap { idx =>
-            val fieldValue = fieldValueAt(value, registers(idx))
+            val fieldValue = fieldValueAt(value, idx, registers(idx))
             val tc         = encoders(idx)
 
             if (keepNulls || !tc.isAbsent(fieldValue)) Some(element(names(idx), tc.toBsonValue(fieldValue)))
@@ -710,12 +711,16 @@ object BsonSchemaCodec {
           new BsonDocument(elements.asJava)
         }
 
-      private def fieldValueAt(value: Z, register: Register[Any]): Any = {
-        val deconstructor = schema.deconstructor
-        val registers     = Registers(deconstructor.usedRegisters)
-        deconstructor.deconstruct(registers, 0, value)
-        register.get(registers, 0)
-      }
+      private def fieldValueAt(value: Z, idx: Int, register: Register[Any]): Any =
+        value match {
+          case product: Product if product.productArity == fields.length =>
+            product.productElement(fieldIndices(idx))
+          case _ =>
+            val deconstructor = schema.deconstructor
+            val registers     = Registers(schema.usedRegisters)
+            deconstructor.deconstruct(registers, 0, value)
+            register.get(registers, 0)
+        }
     }
 
     private def sequenceEncoder[A, C[_]](config: Config)(schema: Reflect.Sequence[Binding, A, C]): BsonEncoder[C[A]] = {

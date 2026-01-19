@@ -9,7 +9,7 @@ import org.bson.types.{Decimal128, ObjectId}
 import org.bson.{BsonBinaryReader, BsonBinaryWriter, BsonDecimal128, BsonDocument, BsonReader, BsonValue, BsonWriter}
 
 import zio.bson.BsonBuilder._
-import zio.bson._
+import zio.bson.{BsonCodec, BsonDecoder, BsonDecoderOps, BsonEncoder, BsonEncoderOps, zioBsonCodecProvider}
 import zio.blocks.schema.{Schema, SchemaBaseSpec}
 import zio.test._
 import zio.test.diff.Diff

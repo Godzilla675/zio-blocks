@@ -1,6 +1,6 @@
 package zio.blocks.schema.bson
 
-import zio.bson._
+import zio.bson.BsonCodec
 import zio.blocks.schema.Schema
 import zio.blocks.schema.annotation._
 

@@ -1,7 +1,7 @@
 package zio.blocks.schema.bson
 
 import zio.bson.BsonBuilder._
-import zio.bson._
+import zio.bson.BsonCodec
 import zio.blocks.schema.Schema
 import zio.blocks.schema.bson.BsonSchemaCodecSpec.roundTripTest
 import zio.Scope
