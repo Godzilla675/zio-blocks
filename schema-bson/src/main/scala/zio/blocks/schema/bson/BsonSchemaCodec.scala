@@ -6,7 +6,7 @@ import scala.collection.immutable.{HashMap, ListMap}
 import scala.jdk.CollectionConverters._
 
 import org.bson.types.ObjectId
-import org.bson.{BsonDocument, BsonNull, BsonReader, BsonType, BsonValue, BsonWriter}
+import org.bson.{BsonDocument, BsonElement, BsonNull, BsonReader, BsonType, BsonValue, BsonWriter}
 
 import zio.bson.BsonBuilder._
 import zio.bson.DecoderUtils._

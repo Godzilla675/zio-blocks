@@ -20,7 +20,7 @@ package object bson {
       new Reflect.Wrapper[Binding, ObjectId, String](
         stringSchema.reflect,
         typeName,
-        Reflect.unwrapToPrimitiveTypeOption(stringSchema.reflect),
+        None,
         binding
       )
     ).modifier(Modifier.config(ObjectIdConfigKey, "true"))
