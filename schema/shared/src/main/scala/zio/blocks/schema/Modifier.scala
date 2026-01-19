@@ -61,3 +61,39 @@ object Modifier {
    */
   @field case class config(key: String, value: String) extends Term with Reflect
 }
+
+package annotation {
+  import scala.annotation.meta.field
+
+  final case class caseName(name: String) extends Modifier.Term
+
+  final case class caseNameAliases(aliases: String*) extends Modifier.Term
+
+  @field final case class fieldName(name: String) extends Modifier.Term
+
+  @field final case class fieldNameAliases(aliases: String*) extends Modifier.Term
+
+  @field final case class transientField() extends Modifier.Term
+
+  final case class transientCase() extends Modifier.Term
+
+  final case class discriminatorName(tag: String) extends Modifier.Reflect
+
+  final class noDiscriminator extends Modifier.Reflect
+
+  final class rejectExtraFields extends Modifier.Reflect
+}
+
+package bson {
+  import scala.annotation.meta.field
+
+  @field final case class bsonField(name: String) extends Modifier.Term
+
+  final case class bsonHint(name: String) extends Modifier.Term
+
+  final case class bsonDiscriminator(name: String) extends Modifier.Reflect
+
+  final class bsonNoExtraFields extends Modifier.Reflect
+
+  @field final class bsonExclude extends Modifier.Term
+}

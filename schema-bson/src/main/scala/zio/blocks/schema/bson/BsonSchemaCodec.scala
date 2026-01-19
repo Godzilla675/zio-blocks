@@ -13,7 +13,7 @@ import zio.bson.DecoderUtils._
 import zio.bson._
 import zio.blocks.schema.annotation._
 import zio.blocks.schema.binding.{Binding, Register, Registers}
-import zio.blocks.schema.{DynamicValue, PrimitiveType, Reflect, Schema, TypeName}
+import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveType, PrimitiveValue, Reflect, Schema, Term, TypeName}
 import zio.{Chunk, ChunkBuilder, Unsafe}
 
 object BsonSchemaCodec {
@@ -27,8 +27,6 @@ object BsonSchemaCodec {
 
     final case class DiscriminatorField(name: String) extends SumTypeHandling
   }
-
-  private implicit val bindingHasBinding = Binding.bindingHasBinding
 
   /**
    * Configuration for the BSON schema codec.
@@ -78,7 +76,7 @@ object BsonSchemaCodec {
     bsonCodec(schema, Config)
 
   object Codecs {
-    protected[codec] val unitEncoder: BsonEncoder[Unit] = new BsonEncoder[Unit] {
+    private[bson] val unitEncoder: BsonEncoder[Unit] = new BsonEncoder[Unit] {
       override def encode(writer: BsonWriter, value: Unit, ctx: BsonEncoder.EncoderContext): Unit =
         if (!ctx.inlineNextObject) {
           writer.writeStartDocument()
@@ -88,7 +86,7 @@ object BsonSchemaCodec {
       override def toBsonValue(value: Unit): BsonValue = doc()
     }
 
-    private[codec] val unitDecoder: BsonDecoder[Unit] =
+    private[bson] val unitDecoder: BsonDecoder[Unit] =
       new BsonDecoder[Unit] {
         private val noExtra = true
 
@@ -129,9 +127,9 @@ object BsonSchemaCodec {
           }
       }
 
-    protected[codec] val unitCodec: BsonCodec[Unit] = BsonCodec(unitEncoder, unitDecoder)
+    private[bson] val unitCodec: BsonCodec[Unit] = BsonCodec(unitEncoder, unitDecoder)
 
-    protected[codec] def tuple2Encoder[A: BsonEncoder, B: BsonEncoder]: BsonEncoder[(A, B)] =
+    private[bson] def tuple2Encoder[A: BsonEncoder, B: BsonEncoder]: BsonEncoder[(A, B)] =
       new BsonEncoder[(A, B)] {
         override def encode(writer: BsonWriter, value: (A, B), ctx: BsonEncoder.EncoderContext): Unit = {
           val nextCtx = BsonEncoder.EncoderContext.default
@@ -154,7 +152,7 @@ object BsonSchemaCodec {
           )
       }
 
-    protected[codec] def tuple2Decoder[A: BsonDecoder, B: BsonDecoder]: BsonDecoder[(A, B)] =
+    private[bson] def tuple2Decoder[A: BsonDecoder, B: BsonDecoder]: BsonDecoder[(A, B)] =
       new BsonDecoder[(A, B)] {
         private val noExtra = true
 
@@ -228,10 +226,10 @@ object BsonSchemaCodec {
           }
       }
 
-    protected[codec] def tuple2Codec[A: BsonEncoder: BsonDecoder, B: BsonEncoder: BsonDecoder]: BsonCodec[(A, B)] =
+    private[bson] def tuple2Codec[A: BsonEncoder: BsonDecoder, B: BsonEncoder: BsonDecoder]: BsonCodec[(A, B)] =
       BsonCodec(tuple2Encoder, tuple2Decoder)
 
-    protected[codec] def eitherEncoder[A: BsonEncoder, B: BsonEncoder]: BsonEncoder[Either[A, B]] =
+    private[bson] def eitherEncoder[A: BsonEncoder, B: BsonEncoder]: BsonEncoder[Either[A, B]] =
       new BsonEncoder[Either[A, B]] {
         override def encode(writer: BsonWriter, value: Either[A, B], ctx: BsonEncoder.EncoderContext): Unit = {
           val nextCtx = BsonEncoder.EncoderContext.default
@@ -256,7 +254,7 @@ object BsonSchemaCodec {
         }
       }
 
-    protected[codec] def eitherDecoder[A: BsonDecoder, B: BsonDecoder]: BsonDecoder[Either[A, B]] =
+    private[bson] def eitherDecoder[A: BsonDecoder, B: BsonDecoder]: BsonDecoder[Either[A, B]] =
       new BsonDecoder[Either[A, B]] {
         private val noExtra = true
 
@@ -332,7 +330,7 @@ object BsonSchemaCodec {
           }
       }
 
-    protected[codec] def failDecoder[A](message: String): BsonDecoder[A] =
+    private[bson] def failDecoder[A](message: String): BsonDecoder[A] =
       new BsonDecoder[A] {
         override def decodeUnsafe(reader: BsonReader, trace: List[BsonTrace], ctx: BsonDecoder.BsonDecoderContext): A =
           throw BsonDecoder.Error(trace, message)
@@ -345,7 +343,7 @@ object BsonSchemaCodec {
           throw BsonDecoder.Error(trace, message)
       }
 
-    private[codec] def primitiveCodec[A](primitiveType: PrimitiveType[A]): BsonCodec[A] =
+    private[bson] def primitiveCodec[A](primitiveType: PrimitiveType[A]): BsonCodec[A] =
       primitiveType match {
         case PrimitiveType.Unit        => unitCodec.asInstanceOf[BsonCodec[A]]
         case _: PrimitiveType.String   => BsonCodec.string.asInstanceOf[BsonCodec[A]]
@@ -384,11 +382,11 @@ object BsonSchemaCodec {
 
     import Codecs._
 
-    private[codec] val CHARSET = java.nio.charset.StandardCharsets.UTF_8
+    private[bson] val CHARSET = java.nio.charset.StandardCharsets.UTF_8
 
     private def chunkEncoder[A: BsonEncoder]: BsonEncoder[Chunk[A]] = BsonEncoder.iterable[A, Chunk]
 
-    private[codec] def schemaEncoder[A](config: Config)(schema: Reflect[Binding, A]): BsonEncoder[A] =
+    private[bson] def schemaEncoder[A](config: Config)(schema: Reflect[Binding, A]): BsonEncoder[A] =
       schema.asPrimitive match {
         case Some(primitive) => primitiveCodec(primitive.primitiveType).encoder
         case _ =>
@@ -432,7 +430,7 @@ object BsonSchemaCodec {
       }
     }
 
-    private[codec] def bsonFieldEncoder[A](schema: Reflect[Binding, A]): Option[BsonFieldEncoder[A]] =
+    private[bson] def bsonFieldEncoder[A](schema: Reflect[Binding, A]): Option[BsonFieldEncoder[A]] =
       schema.asPrimitive match {
         case Some(primitive) =>
           primitive.primitiveType match {
@@ -444,7 +442,7 @@ object BsonSchemaCodec {
         case _ => None
       }
 
-    private[codec] def mapEncoder[K, V, M[_, _]](
+    private[bson] def mapEncoder[K, V, M[_, _]](
       config: Config
     )(schema: Reflect.Map[Binding, K, V, M]): BsonEncoder[M[K, V]] = {
       val valueEncoder = schemaEncoder(config)(schema.value)
@@ -771,7 +769,7 @@ object BsonSchemaCodec {
 
     private def chunkDecoder[A: BsonDecoder]: BsonDecoder[Chunk[A]] = BsonDecoder.iterableFactory[A, Chunk]
 
-    private[codec] def schemaDecoder[A](config: Config)(schema: Reflect[Binding, A]): BsonDecoder[A] =
+    private[bson] def schemaDecoder[A](config: Config)(schema: Reflect[Binding, A]): BsonDecoder[A] =
       schema.asPrimitive match {
         case Some(primitive) => primitiveCodec(primitive.primitiveType).decoder
         case None =>
@@ -812,14 +810,14 @@ object BsonSchemaCodec {
     private def wrapperDecoder[A, B](config: Config)(schema: Reflect.Wrapper[Binding, A, B]): BsonDecoder[A] = {
       if (isObjectId(schema.modifiers)) {
         BsonDecoder.objectId.mapOrFail { oid =>
-          schema.binding.wrap(oid.toHexString).left.map(identity)
+          schema.binding.wrap(oid.toHexString.asInstanceOf[B]).left.map(identity)
         }
       } else {
         schemaDecoder(config)(schema.wrapped).mapOrFail(schema.binding.wrap)
       }
     }
 
-    private[codec] def mapDecoder[K, V, M[_, _]](
+    private[bson] def mapDecoder[K, V, M[_, _]](
       config: Config
     )(schema: Reflect.Map[Binding, K, V, M]): BsonDecoder[M[K, V]] = {
       val valueDecoder = schemaDecoder(config)(schema.value)
@@ -911,7 +909,7 @@ object BsonSchemaCodec {
       }
     }
 
-    private[codec] def bsonFieldDecoder[A](schema: Reflect[Binding, A]): Option[BsonFieldDecoder[A]] =
+    private[bson] def bsonFieldDecoder[A](schema: Reflect[Binding, A]): Option[BsonFieldDecoder[A]] =
       schema.asPrimitive match {
         case Some(primitive) =>
           primitive.primitiveType match {
@@ -1299,101 +1297,102 @@ object BsonSchemaCodec {
       }
     }
 
-    private def bsonToDynamicValue(bsonValue: BsonValue): DynamicValue =
-      bsonValue.getBsonType match {
-        case BsonType.END_OF_DOCUMENT => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.DOUBLE          => DynamicValue.Primitive(new PrimitiveValue.Double(bsonValue.asDouble().getValue))
-        case BsonType.STRING          => DynamicValue.Primitive(new PrimitiveValue.String(bsonValue.asString().getValue))
-        case BsonType.DOCUMENT =>
-          val values = bsonValue
-            .asDocument()
-            .asScala
-            .toSeq
-            .map {
-              case (k, v) => k -> bsonToDynamicValue(v)
-            }
+  }
 
-          DynamicValue.Record(values.toVector)
-        case BsonType.ARRAY =>
-          DynamicValue.Sequence(bsonValue.asArray().getValues.asScala.map(bsonToDynamicValue).toVector)
-        case BsonType.BINARY =>
-          val bytes = bsonValue.asBinary().getData
-          DynamicValue.Sequence(bytes.toVector.map(byte => DynamicValue.Primitive(new PrimitiveValue.Byte(byte))))
-        case BsonType.UNDEFINED => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.OBJECT_ID =>
-          DynamicValue.Record(
-            Vector(
-              ObjectIdTag -> DynamicValue.Primitive(
-                new PrimitiveValue.String(bsonValue.asObjectId().getValue.toHexString)
-              )
+  private[bson] def bsonToDynamicValue(bsonValue: BsonValue): DynamicValue =
+    bsonValue.getBsonType match {
+      case BsonType.END_OF_DOCUMENT => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.DOUBLE          => DynamicValue.Primitive(new PrimitiveValue.Double(bsonValue.asDouble().getValue))
+      case BsonType.STRING          => DynamicValue.Primitive(new PrimitiveValue.String(bsonValue.asString().getValue))
+      case BsonType.DOCUMENT =>
+        val values = bsonValue
+          .asDocument()
+          .asScala
+          .toSeq
+          .map {
+            case (k, v) => k -> bsonToDynamicValue(v)
+          }
+
+        DynamicValue.Record(values.toVector)
+      case BsonType.ARRAY =>
+        DynamicValue.Sequence(bsonValue.asArray().getValues.asScala.map(bsonToDynamicValue).toVector)
+      case BsonType.BINARY =>
+        val bytes = bsonValue.asBinary().getData
+        DynamicValue.Sequence(bytes.toVector.map(byte => DynamicValue.Primitive(new PrimitiveValue.Byte(byte))))
+      case BsonType.UNDEFINED => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.OBJECT_ID =>
+        DynamicValue.Record(
+          Vector(
+            ObjectIdTag -> DynamicValue.Primitive(
+              new PrimitiveValue.String(bsonValue.asObjectId().getValue.toHexString)
             )
           )
-        case BsonType.BOOLEAN => DynamicValue.Primitive(new PrimitiveValue.Boolean(bsonValue.asBoolean().getValue))
-        case BsonType.DATE_TIME =>
-          DynamicValue.Primitive(new PrimitiveValue.Instant(Instant.ofEpochMilli(bsonValue.asDateTime().getValue)))
-        case BsonType.NULL                  => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.REGULAR_EXPRESSION    => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.DB_POINTER            => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.JAVASCRIPT            => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.SYMBOL                => DynamicValue.Primitive(new PrimitiveValue.String(bsonValue.asSymbol().getSymbol))
-        case BsonType.JAVASCRIPT_WITH_SCOPE => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.INT32 => DynamicValue.Primitive(new PrimitiveValue.Int(bsonValue.asInt32().getValue))
-        case BsonType.TIMESTAMP =>
-          DynamicValue.Primitive(new PrimitiveValue.Instant(Instant.ofEpochMilli(bsonValue.asTimestamp().getValue)))
-        case BsonType.INT64 => DynamicValue.Primitive(new PrimitiveValue.Long(bsonValue.asInt64().getValue))
-        case BsonType.DECIMAL128 =>
-          DynamicValue.Primitive(
-            new PrimitiveValue.BigDecimal(bsonValue.asDecimal128().getValue.bigDecimalValue())
-          )
-        case BsonType.MIN_KEY => DynamicValue.Primitive(PrimitiveValue.Unit)
-        case BsonType.MAX_KEY => DynamicValue.Primitive(PrimitiveValue.Unit)
-      }
+        )
+      case BsonType.BOOLEAN => DynamicValue.Primitive(new PrimitiveValue.Boolean(bsonValue.asBoolean().getValue))
+      case BsonType.DATE_TIME =>
+        DynamicValue.Primitive(new PrimitiveValue.Instant(Instant.ofEpochMilli(bsonValue.asDateTime().getValue)))
+      case BsonType.NULL                  => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.REGULAR_EXPRESSION    => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.DB_POINTER            => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.JAVASCRIPT            => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.SYMBOL                => DynamicValue.Primitive(new PrimitiveValue.String(bsonValue.asSymbol().getSymbol))
+      case BsonType.JAVASCRIPT_WITH_SCOPE => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.INT32 => DynamicValue.Primitive(new PrimitiveValue.Int(bsonValue.asInt32().getValue))
+      case BsonType.TIMESTAMP =>
+        DynamicValue.Primitive(new PrimitiveValue.Instant(Instant.ofEpochMilli(bsonValue.asTimestamp().getValue)))
+      case BsonType.INT64 => DynamicValue.Primitive(new PrimitiveValue.Long(bsonValue.asInt64().getValue))
+      case BsonType.DECIMAL128 =>
+        DynamicValue.Primitive(
+          new PrimitiveValue.BigDecimal(bsonValue.asDecimal128().getValue.bigDecimalValue())
+        )
+      case BsonType.MIN_KEY => DynamicValue.Primitive(PrimitiveValue.Unit)
+      case BsonType.MAX_KEY => DynamicValue.Primitive(PrimitiveValue.Unit)
+    }
 
-    private def dynamicValueToBson(value: DynamicValue): BsonValue =
-      value match {
-        case DynamicValue.Primitive(primitive) =>
-          primitive match {
-            case PrimitiveValue.Unit             => BsonNull.VALUE
-            case PrimitiveValue.Boolean(value)   => BsonCodec.boolean.encoder.toBsonValue(value)
-            case PrimitiveValue.Byte(value)      => BsonCodec.byte.encoder.toBsonValue(value)
-            case PrimitiveValue.Short(value)     => BsonCodec.short.encoder.toBsonValue(value)
-            case PrimitiveValue.Int(value)       => BsonCodec.int.encoder.toBsonValue(value)
-            case PrimitiveValue.Long(value)      => BsonCodec.long.encoder.toBsonValue(value)
-            case PrimitiveValue.Float(value)     => BsonCodec.float.encoder.toBsonValue(value)
-            case PrimitiveValue.Double(value)    => BsonCodec.double.encoder.toBsonValue(value)
-            case PrimitiveValue.Char(value)      => BsonCodec.char.encoder.toBsonValue(value)
-            case PrimitiveValue.String(value)    => BsonCodec.string.encoder.toBsonValue(value)
-            case PrimitiveValue.BigInt(value)    => BsonCodec.bigInt.encoder.toBsonValue(value)
-            case PrimitiveValue.BigDecimal(value) => BsonCodec.bigDecimal.encoder.toBsonValue(value)
-            case PrimitiveValue.DayOfWeek(value) => BsonCodec.dayOfWeek.encoder.toBsonValue(value)
-            case PrimitiveValue.Duration(value)  => BsonCodec.duration.encoder.toBsonValue(value)
-            case PrimitiveValue.Instant(value)   => BsonCodec.instant.encoder.toBsonValue(value)
-            case PrimitiveValue.LocalDate(value) => BsonCodec.localDate.encoder.toBsonValue(value)
-            case PrimitiveValue.LocalDateTime(value) => BsonCodec.localDateTime.encoder.toBsonValue(value)
-            case PrimitiveValue.LocalTime(value) => BsonCodec.localTime.encoder.toBsonValue(value)
-            case PrimitiveValue.Month(value)     => BsonCodec.month.encoder.toBsonValue(value)
-            case PrimitiveValue.MonthDay(value)  => BsonCodec.monthDay.encoder.toBsonValue(value)
-            case PrimitiveValue.OffsetDateTime(value) => BsonCodec.offsetDateTime.encoder.toBsonValue(value)
-            case PrimitiveValue.OffsetTime(value) => BsonCodec.offsetTime.encoder.toBsonValue(value)
-            case PrimitiveValue.Period(value)    => BsonCodec.period.encoder.toBsonValue(value)
-            case PrimitiveValue.Year(value)      => BsonCodec.year.encoder.toBsonValue(value)
-            case PrimitiveValue.YearMonth(value) => BsonCodec.yearMonth.encoder.toBsonValue(value)
-            case PrimitiveValue.ZoneId(value)    => BsonCodec.zoneId.encoder.toBsonValue(value)
-            case PrimitiveValue.ZoneOffset(value) => BsonCodec.zoneOffset.encoder.toBsonValue(value)
-            case PrimitiveValue.ZonedDateTime(value) => BsonCodec.zonedDateTime.encoder.toBsonValue(value)
-            case PrimitiveValue.UUID(value)      => BsonCodec.uuid.encoder.toBsonValue(value)
-            case PrimitiveValue.Currency(value)  => BsonCodec.currency.encoder.toBsonValue(value)
-          }
-        case DynamicValue.Record(fields) =>
-          new BsonDocument(fields.view.map { case (key, value) => element(key, dynamicValueToBson(value)) }.to(Chunk).asJava)
-        case DynamicValue.Sequence(values) =>
-          array(values.map(dynamicValueToBson): _*)
-        case DynamicValue.Variant(caseName, value) =>
-          doc(caseName -> dynamicValueToBson(value))
-        case DynamicValue.Map(entries) =>
-          array(entries.map { case (key, value) => doc("_1" -> dynamicValueToBson(key), "_2" -> dynamicValueToBson(value)) }: _*)
-      }
-  }
+  private[bson] def dynamicValueToBson(value: DynamicValue): BsonValue =
+    value match {
+      case DynamicValue.Primitive(primitive) =>
+        primitive match {
+          case PrimitiveValue.Unit             => BsonNull.VALUE
+          case PrimitiveValue.Boolean(value)   => BsonCodec.boolean.encoder.toBsonValue(value)
+          case PrimitiveValue.Byte(value)      => BsonCodec.byte.encoder.toBsonValue(value)
+          case PrimitiveValue.Short(value)     => BsonCodec.short.encoder.toBsonValue(value)
+          case PrimitiveValue.Int(value)       => BsonCodec.int.encoder.toBsonValue(value)
+          case PrimitiveValue.Long(value)      => BsonCodec.long.encoder.toBsonValue(value)
+          case PrimitiveValue.Float(value)     => BsonCodec.float.encoder.toBsonValue(value)
+          case PrimitiveValue.Double(value)    => BsonCodec.double.encoder.toBsonValue(value)
+          case PrimitiveValue.Char(value)      => BsonCodec.char.encoder.toBsonValue(value)
+          case PrimitiveValue.String(value)    => BsonCodec.string.encoder.toBsonValue(value)
+          case PrimitiveValue.BigInt(value)    => BsonCodec.bigInt.encoder.toBsonValue(value)
+          case PrimitiveValue.BigDecimal(value) => BsonCodec.bigDecimal.encoder.toBsonValue(value)
+          case PrimitiveValue.DayOfWeek(value) => BsonCodec.dayOfWeek.encoder.toBsonValue(value)
+          case PrimitiveValue.Duration(value)  => BsonCodec.duration.encoder.toBsonValue(value)
+          case PrimitiveValue.Instant(value)   => BsonCodec.instant.encoder.toBsonValue(value)
+          case PrimitiveValue.LocalDate(value) => BsonCodec.localDate.encoder.toBsonValue(value)
+          case PrimitiveValue.LocalDateTime(value) => BsonCodec.localDateTime.encoder.toBsonValue(value)
+          case PrimitiveValue.LocalTime(value) => BsonCodec.localTime.encoder.toBsonValue(value)
+          case PrimitiveValue.Month(value)     => BsonCodec.month.encoder.toBsonValue(value)
+          case PrimitiveValue.MonthDay(value)  => BsonCodec.monthDay.encoder.toBsonValue(value)
+          case PrimitiveValue.OffsetDateTime(value) => BsonCodec.offsetDateTime.encoder.toBsonValue(value)
+          case PrimitiveValue.OffsetTime(value) => BsonCodec.offsetTime.encoder.toBsonValue(value)
+          case PrimitiveValue.Period(value)    => BsonCodec.period.encoder.toBsonValue(value)
+          case PrimitiveValue.Year(value)      => BsonCodec.year.encoder.toBsonValue(value)
+          case PrimitiveValue.YearMonth(value) => BsonCodec.yearMonth.encoder.toBsonValue(value)
+          case PrimitiveValue.ZoneId(value)    => BsonCodec.zoneId.encoder.toBsonValue(value)
+          case PrimitiveValue.ZoneOffset(value) => BsonCodec.zoneOffset.encoder.toBsonValue(value)
+          case PrimitiveValue.ZonedDateTime(value) => BsonCodec.zonedDateTime.encoder.toBsonValue(value)
+          case PrimitiveValue.UUID(value)      => BsonCodec.uuid.encoder.toBsonValue(value)
+          case PrimitiveValue.Currency(value)  => BsonCodec.currency.encoder.toBsonValue(value)
+        }
+      case DynamicValue.Record(fields) =>
+        new BsonDocument(fields.view.map { case (key, value) => element(key, dynamicValueToBson(value)) }.to(Chunk).asJava)
+      case DynamicValue.Sequence(values) =>
+        array(values.map(dynamicValueToBson): _*)
+      case DynamicValue.Variant(caseName, value) =>
+        doc(caseName -> dynamicValueToBson(value))
+      case DynamicValue.Map(entries) =>
+        array(entries.map { case (key, value) => doc("_1" -> dynamicValueToBson(key), "_2" -> dynamicValueToBson(value)) }: _*)
+    }
 
   private def isObjectId(modifiers: Seq[Modifier.Reflect]): Boolean =
     modifiers.collectFirst { case Modifier.config(ObjectIdConfigKey, "true") => () }.isDefined
