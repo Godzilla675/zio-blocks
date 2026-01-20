@@ -12,7 +12,7 @@ import zio.bson.BsonBuilder._
 import zio.bson.DecoderUtils._
 import zio.bson.{BsonCodec, BsonDecoder, BsonEncoder, BsonEncoderOps, BsonFieldDecoder, BsonFieldEncoder, BsonTrace}
 import zio.blocks.schema.annotation._
-import zio.blocks.schema.binding.{Binding, Register, Registers}
+import zio.blocks.schema.binding.{Binding, Register, Registers, RegisterOffset}
 import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveType, PrimitiveValue, Reflect, Schema, Term, TypeName}
 import zio.Chunk
 
@@ -662,6 +662,7 @@ object BsonSchemaCodec {
 
       private val fieldIndices = fields.indices.filterNot(idx => isTransient(fields(idx))).toArray
       private val nonTransientFields = fieldIndices.map(fields(_))
+      private val allRegisters = recordRegisters(schema)
 
       private val names: Array[String] =
         nonTransientFields.map(encodedFieldName)
@@ -669,8 +670,9 @@ object BsonSchemaCodec {
       private lazy val encoders: Array[BsonEncoder[Any]] =
         nonTransientFields.map(s => schemaEncoder(config)(s.value).asInstanceOf[BsonEncoder[Any]])
 
-      private val registers = fieldIndices.map(schema.registers).asInstanceOf[Array[Register[Any]]]
+      private val registers = fieldIndices.map(allRegisters).asInstanceOf[Array[Register[Any]]]
       private val len       = nonTransientFields.length
+      private val usedRegisters = Reflect.Record.usedRegisters(allRegisters)
 
       def encode(writer: BsonWriter, value: Z, ctx: BsonEncoder.EncoderContext): Unit =
         if (names.length == 1 && names(0) == ObjectIdTag) {
@@ -720,7 +722,7 @@ object BsonSchemaCodec {
             product.productElement(fieldIndices(idx))
           case _ =>
             val deconstructor = schema.deconstructor
-            val registers     = Registers(schema.usedRegisters)
+            val registers     = Registers(usedRegisters)
             deconstructor.deconstruct(registers, 0, value)
             register.get(registers, 0)
         }
@@ -1143,7 +1145,7 @@ object BsonSchemaCodec {
         case _: bsonNoExtraFields => true
         case _                    => false
       }
-      val registers = schema.registers.toArray.asInstanceOf[Array[Register[Any]]]
+      val registers = recordRegisters(schema)
       val defaults  = fields.map(_.value.getDefaultValue.map(_.asInstanceOf[Any])).toArray
       val optionals = fields.map(field => isOptional(field.value)).toArray
       val transients = fields.map(isTransient).toArray
@@ -1442,4 +1444,57 @@ object BsonSchemaCodec {
   private def isEither[A](variant: Reflect.Variant[Binding, A]): Boolean =
     variant.typeName.namespace == TypeName.option(TypeName.string).namespace &&
       variant.typeName.name == "Either" && variant.cases.length == 2
+
+  private def recordRegisters(schema: Reflect.Record[Binding, ?]): Array[Register[Any]] = {
+    if (!schema.fields.exists(_.value.isInstanceOf[Reflect.Deferred[Binding, ?]])) {
+      schema.registers.toArray.asInstanceOf[Array[Register[Any]]]
+    } else {
+      var offset    = 0L
+      val registers = new Array[Register[?]](schema.fields.length)
+      schema.fields.zipWithIndex.foreach { case (field, idx) =>
+        val primitive = field.value match {
+          case _: Reflect.Deferred[Binding, ?] => None
+          case _ => Reflect.unwrapToPrimitiveTypeOption(field.value)
+        }
+        primitive match {
+          case Some(primitiveType) =>
+            primitiveType match {
+              case PrimitiveType.Unit =>
+                registers(idx) = Register.Unit
+              case _: PrimitiveType.Boolean =>
+                registers(idx) = new Register.Boolean(offset)
+                offset = RegisterOffset.incrementBooleansAndBytes(offset)
+              case _: PrimitiveType.Byte =>
+                registers(idx) = new Register.Byte(offset)
+                offset = RegisterOffset.incrementBooleansAndBytes(offset)
+              case _: PrimitiveType.Char =>
+                registers(idx) = new Register.Char(offset)
+                offset = RegisterOffset.incrementCharsAndShorts(offset)
+              case _: PrimitiveType.Short =>
+                registers(idx) = new Register.Short(offset)
+                offset = RegisterOffset.incrementCharsAndShorts(offset)
+              case _: PrimitiveType.Float =>
+                registers(idx) = new Register.Float(offset)
+                offset = RegisterOffset.incrementFloatsAndInts(offset)
+              case _: PrimitiveType.Int =>
+                registers(idx) = new Register.Int(offset)
+                offset = RegisterOffset.incrementFloatsAndInts(offset)
+              case _: PrimitiveType.Double =>
+                registers(idx) = new Register.Double(offset)
+                offset = RegisterOffset.incrementDoublesAndLongs(offset)
+              case _: PrimitiveType.Long =>
+                registers(idx) = new Register.Long(offset)
+                offset = RegisterOffset.incrementDoublesAndLongs(offset)
+              case _ =>
+                registers(idx) = new Register.Object(offset)
+                offset = RegisterOffset.incrementObjects(offset)
+            }
+          case None =>
+            registers(idx) = new Register.Object(offset)
+            offset = RegisterOffset.incrementObjects(offset)
+        }
+      }
+      registers.asInstanceOf[Array[Register[Any]]]
+    }
+  }
 }
