@@ -392,6 +392,9 @@ object BsonSchemaCodec {
             case deferred: Reflect.Deferred[Binding, A] =>
               lazy val inner = schemaEncoder(config)(deferred.value)
               new BsonEncoder[A] {
+                override def isAbsent(value: A): Boolean =
+                  inner.isAbsent(value)
+
                 def encode(writer: BsonWriter, value: A, ctx: BsonEncoder.EncoderContext): Unit =
                   inner.encode(writer, value, ctx)
 
@@ -763,6 +766,9 @@ object BsonSchemaCodec {
               new BsonDecoder[A] {
                 override def decodeUnsafe(reader: BsonReader, trace: List[BsonTrace], ctx: BsonDecoder.BsonDecoderContext): A =
                   inner.decodeUnsafe(reader, trace, ctx)
+
+                override def decodeMissingUnsafe(trace: List[BsonTrace]): A =
+                  inner.decodeMissingUnsafe(trace)
 
                 override def fromBsonValueUnsafe(
                   value: BsonValue,
