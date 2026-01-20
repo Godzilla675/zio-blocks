@@ -20,11 +20,20 @@ object BsonSchemaCodec {
 
   type TermMapping = String => String
 
+  /**
+   * Strategy for encoding and decoding sum types (sealed traits / enums) in BSON.
+   */
   sealed trait SumTypeHandling
 
   object SumTypeHandling {
+    /**
+     * Encode each case as a wrapper document keyed by the mapped class name.
+     */
     case object WrapperWithClassNameField extends SumTypeHandling
 
+    /**
+     * Encode each case as a document containing a discriminator field with the mapped class name.
+     */
     final case class DiscriminatorField(name: String) extends SumTypeHandling
   }
 
@@ -57,21 +66,39 @@ object BsonSchemaCodec {
         classNameMapping = identity
       )
 
+  /**
+   * Derives a BSON encoder for the provided schema using the given configuration.
+   */
   def bsonEncoder[A](schema: Schema[A], config: Config): BsonEncoder[A] =
     BsonSchemaEncoder.schemaEncoder(config)(schema.reflect)
 
+  /**
+   * Derives a BSON encoder for the provided schema using the default configuration.
+   */
   def bsonEncoder[A](schema: Schema[A]): BsonEncoder[A] =
     bsonEncoder(schema, Config)
 
+  /**
+   * Derives a BSON decoder for the provided schema using the given configuration.
+   */
   def bsonDecoder[A](schema: Schema[A], config: Config): BsonDecoder[A] =
     BsonSchemaDecoder.schemaDecoder(config)(schema.reflect)
 
+  /**
+   * Derives a BSON decoder for the provided schema using the default configuration.
+   */
   def bsonDecoder[A](schema: Schema[A]): BsonDecoder[A] =
     bsonDecoder(schema, Config)
 
+  /**
+   * Derives a BSON codec for the provided schema using the given configuration.
+   */
   def bsonCodec[A](schema: Schema[A], config: Config): BsonCodec[A] =
     BsonCodec(bsonEncoder(schema, config), bsonDecoder(schema, config))
 
+  /**
+   * Derives a BSON codec for the provided schema using the default configuration.
+   */
   def bsonCodec[A](schema: Schema[A]): BsonCodec[A] =
     bsonCodec(schema, Config)
 
@@ -180,7 +207,7 @@ object BsonSchemaCodec {
             } else if (name == "_2") {
               _2 = BsonDecoder[B].decodeUnsafe(reader, fieldTrace, nextCtx)
               has_2 = true
-            } else if (noExtra & !ctx.ignoreExtraField.contains(name)) {
+            } else if (noExtra && !ctx.ignoreExtraField.contains(name)) {
               throw BsonDecoder.Error(fieldTrace, "Invalid extra field.")
             } else reader.skipValue()
           }
@@ -214,7 +241,7 @@ object BsonSchemaCodec {
               } else if (name == "_2") {
                 _2 = BsonDecoder[B].fromBsonValueUnsafe(value, fieldTrace, nextCtx)
                 has_2 = true
-              } else if (noExtra & !ctx.ignoreExtraField.contains(name)) {
+              } else if (noExtra && !ctx.ignoreExtraField.contains(name)) {
                 throw BsonDecoder.Error(fieldTrace, "Invalid extra field.")
               }
             }
@@ -282,7 +309,7 @@ object BsonSchemaCodec {
             } else if (name == "right") {
               right = BsonDecoder[B].decodeUnsafe(reader, fieldTrace, nextCtx)
               hasRight = true
-            } else if (noExtra & !ctx.ignoreExtraField.contains(name)) {
+            } else if (noExtra && !ctx.ignoreExtraField.contains(name)) {
               throw BsonDecoder.Error(fieldTrace, "Invalid extra field.")
             } else reader.skipValue()
           }
@@ -317,7 +344,7 @@ object BsonSchemaCodec {
               } else if (name == "right") {
                 right = BsonDecoder[B].fromBsonValueUnsafe(value, fieldTrace, nextCtx)
                 hasRight = true
-              } else if (noExtra & !ctx.ignoreExtraField.contains(name)) {
+              } else if (noExtra && !ctx.ignoreExtraField.contains(name)) {
                 throw BsonDecoder.Error(fieldTrace, "Invalid extra field.")
               }
             }
@@ -382,8 +409,6 @@ object BsonSchemaCodec {
 
     import Codecs._
 
-    private[bson] val CHARSET = java.nio.charset.StandardCharsets.UTF_8
-
     private[bson] def schemaEncoder[A](config: Config)(schema: Reflect[Binding, A]): BsonEncoder[A] =
       schema.asPrimitive match {
         case Some(primitive) => primitiveCodec(primitive.primitiveType).encoder
@@ -416,7 +441,7 @@ object BsonSchemaCodec {
             case _ if schema.isDynamic =>
               dynamicEncoder(config)(schema.asDynamic.get).asInstanceOf[BsonEncoder[A]]
             case _ =>
-              throw new Exception(s"Missing a handler for encoding of schema $schema.")
+              throw new IllegalArgumentException(s"Missing a handler for encoding of schema $schema.")
           }
       }
 
@@ -795,7 +820,7 @@ object BsonSchemaCodec {
             case _ if schema.isDynamic =>
               dynamicDecoder.asInstanceOf[BsonDecoder[A]]
             case _ =>
-              throw new Exception(s"Missing a handler for decoding of schema $schema.")
+              throw new IllegalArgumentException(s"Missing a handler for decoding of schema $schema.")
           }
       }
 

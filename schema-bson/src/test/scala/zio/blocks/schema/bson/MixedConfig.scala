@@ -160,7 +160,6 @@ object MixedConfig {
     case class B(s: String) extends TransientCaseWithoutDiscriminator
 
     @transientCase
-    @bsonExclude
     case class C(s: String) extends TransientCaseWithoutDiscriminator
 
     implicit lazy val schema: Schema[TransientCaseWithoutDiscriminator]   = Schema.derived
