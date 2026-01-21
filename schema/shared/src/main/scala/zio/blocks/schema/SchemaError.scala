@@ -32,6 +32,9 @@ object SchemaError {
   def unknownCase(trace: List[DynamicOptic.Node], caseName: String): SchemaError =
     new SchemaError(new ::(new UnknownCase(toDynamicOptic(trace), caseName), Nil))
 
+  def validationFailed(trace: List[DynamicOptic.Node], message: String): SchemaError =
+    new SchemaError(new ::(new ValidationFailed(toDynamicOptic(trace), message), Nil))
+
   private[this] def toDynamicOptic(trace: List[DynamicOptic.Node]): DynamicOptic = {
     val nodes = trace.toArray
     reverse(nodes)
@@ -71,5 +74,9 @@ object SchemaError {
 
   case class UnknownCase(source: DynamicOptic, caseName: String) extends Single {
     override def message: String = s"Unknown case '$caseName' at: $source"
+  }
+
+  case class ValidationFailed(source: DynamicOptic, error: String) extends Single {
+    override def message: String = s"Validation failed: $error at: $source"
   }
 }
