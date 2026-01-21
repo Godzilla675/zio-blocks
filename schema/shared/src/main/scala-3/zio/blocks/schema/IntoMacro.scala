@@ -15,34 +15,21 @@ object IntoMacro {
     val symB = tpeB.typeSymbol
 
     def deriveProduct(tpeA: TypeRepr, tpeB: TypeRepr): Expr[Into[A, B]] = {
-      val fieldsA = symA.caseFields
-      val fieldsB = symB.caseFields
-
-      // Helper to check if type A is compatible with type B (same or coercible)
-      def isCompatible(t1: TypeRepr, t2: TypeRepr): Boolean = {
-        // We can't check for implicit Into at runtime/expansion easily without Expr.summon which returns Option.
-        // But we can check for strict subtyping.
-        // For general coercibility, we might just assume we'll try to find an Into instance later.
-        true // We rely on summon later.
-      }
+      // Filter distinct names because Tuples in Scala 3 might return duplicate fields (e.g. _1 and _1 )
+      val fieldsA = symA.caseFields.distinctBy(_.name.trim)
+      val fieldsB = symB.caseFields.distinctBy(_.name.trim)
 
       def findMatch(fieldB: Symbol, indexB: Int): Option[(Symbol, TypeRepr)] = {
         val name = fieldB.name
-        val tpeFieldB = tpeB.memberType(fieldB)
+        // val tpeFieldB = tpeB.memberType(fieldB)
 
         // 1. Exact name
         fieldsA.find(_.name == name).map { fieldA =>
           (fieldA, tpeA.memberType(fieldA))
         }.orElse {
-          // 2. Exact name with coercible type (handled by Into check later, so basically name match is enough)
-          // 3. Positional fallback (for Tuples or when names don't match but index does)
-          // Check if it's a tuple? Or just always fallback to position?
-          // The requirement says: "position + unique type (esp. tuples)"
-          // For now, let's implement strict positional fallback if index exists.
-
+          // 3. Positional fallback
           if (fieldsA.size > indexB) {
              val fieldA = fieldsA(indexB)
-             // Should we check type compatibility?
              Some((fieldA, tpeA.memberType(fieldA)))
           } else {
              None
@@ -62,11 +49,11 @@ object IntoMacro {
 
             val resultExpr: Expr[Either[SchemaError, Any]] = findMatch(fieldB, idx) match {
               case Some((fieldA, tpeFieldA)) =>
-                tpeFieldA.asType match { case '[tA] =>
+                tpeFieldA.widen.asType match { case '[tA] =>
                   val valueA = Select(inputTerm, fieldA).asExprOf[tA]
-                  tpeFieldB.asType match { case '[tB] =>
+                  tpeFieldB.widen.asType match { case '[tB] =>
                     val into = Expr.summon[Into[tA, tB]].getOrElse {
-                      report.errorAndAbort(s"Cannot find Into[${TypeRepr.of[tA].show}, ${TypeRepr.of[tB].show}] for field '$name' (mapped from ${fieldA.name})")
+                      report.errorAndAbort(s"Cannot find Into[${TypeRepr.of[tA].show}, ${TypeRepr.of[tB].show}] for field '$name' (mapped from ${fieldA.name} at idx $idx)")
                     }
                     '{ $into.into($valueA).map(_.asInstanceOf[Any]) }
                   }
