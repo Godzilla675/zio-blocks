@@ -39,8 +39,10 @@ object DynamicSchemaExpr {
    *   - [[SchemaExpr.StringRegexMatch]] is currently not supported.
    */
   def fromSchemaExpr[A, B](expr: SchemaExpr[A, B]): Either[String, DynamicSchemaExpr] = expr match {
-    case SchemaExpr.Literal(value, schema) =>
-      Right(DynamicSchemaExpr.Literal(schema.toDynamicValue(value)))
+    // Scala 2 needs the existential type captured via the case class instance
+    // to keep `value` and `schema` tied to the same type parameter.
+    case lit: SchemaExpr.Literal[_, _] =>
+      Right(DynamicSchemaExpr.Literal(lit.schema.toDynamicValue(lit.value)))
 
     case SchemaExpr.Optic(optic) =>
       Right(DynamicSchemaExpr.Path(optic.toDynamic))

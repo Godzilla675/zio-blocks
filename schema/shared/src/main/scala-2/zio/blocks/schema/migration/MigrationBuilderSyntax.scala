@@ -128,21 +128,47 @@ object MigrationBuilderSyntax {
     def transformValues[K, V](selector: A => Map[K, V], transform: DynamicSchemaExpr): MigrationBuilder[A, B] =
       macro MigrationBuilderSyntaxImpl.transformValuesImpl[A, B, K, V]
   }
+
+  /**
+   * Convenient syntax for creating paths from selectors, e.g.:
+   * `MigrationBuilder.paths.from[User, String](_.name)`.
+   */
+  implicit class PathsOps(private val paths: MigrationBuilder.paths.type) extends AnyVal {
+    def from[A, B](selector: A => B): DynamicOptic =
+      macro MigrationBuilderSyntaxImpl.fromImpl[A, B]
+  }
 }
 
 class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
   import c.universe._
 
-  private val selectorMacrosImpl = new SelectorMacrosImpl(c)
+  private def unwrapBuilder(prefix: Tree): Tree = prefix match {
+    case Apply(_, List(b))                       => b
+    case TypeApply(Apply(_, List(b)), _)         => b
+    case Apply(TypeApply(_, _), List(b))         => b
+    case Apply(Select(_, _), List(b))            => b
+    case other =>
+      c.abort(c.enclosingPosition, s"Unexpected macro prefix: ${showRaw(other)}")
+  }
+
+  private def toOpticTree[A: WeakTypeTag, B: WeakTypeTag](selector: c.Expr[A => B]): Tree = {
+    val aTpe = weakTypeOf[A]
+    val bTpe = weakTypeOf[B]
+    q"_root_.zio.blocks.schema.migration.SelectorMacros.toOptic[$aTpe, $bTpe]($selector)"
+  }
+
+  def fromImpl[A: WeakTypeTag, B: WeakTypeTag](selector: c.Expr[A => B]): c.Expr[DynamicOptic] =
+    c.Expr[DynamicOptic](toOpticTree[A, B](selector))
 
   def addFieldImpl[A: WeakTypeTag, B: WeakTypeTag, T: WeakTypeTag](
     selector: c.Expr[B => T],
     default: c.Expr[T]
   )(schema: c.Expr[Schema[T]]): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[B, T](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[B, T](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
+    val tpe     = weakTypeOf[T]
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.addField[$T]($optic, $default)($schema)"
+      q"$builder.addField[$tpe]($optic, $default)($schema)"
     )
   }
 
@@ -150,20 +176,20 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     selector: c.Expr[B => T],
     default: c.Expr[DynamicSchemaExpr]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[B, T](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[B, T](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.addField($optic, $default)"
+      q"$builder.addField($optic, $default)"
     )
   }
 
   def dropFieldImpl[A: WeakTypeTag, B: WeakTypeTag, T: WeakTypeTag](
     selector: c.Expr[A => T]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[A, T](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[A, T](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.dropField($optic)"
+      q"$builder.dropField($optic)"
     )
   }
 
@@ -171,11 +197,11 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     from: c.Expr[A => T],
     to: c.Expr[B => U]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val fromOptic = selectorMacrosImpl.toOpticImpl[A, T](from)
-    val toOptic = selectorMacrosImpl.toOpticImpl[B, U](to)
-    val builder = c.prefix.tree
+    val fromOptic = toOpticTree[A, T](from)
+    val toOptic   = toOpticTree[B, U](to)
+    val builder   = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.renameField($fromOptic, $toOptic)"
+      q"$builder.renameField($fromOptic, $toOptic)"
     )
   }
 
@@ -183,10 +209,10 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     selector: c.Expr[A => T],
     transform: c.Expr[DynamicSchemaExpr]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[A, T](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[A, T](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.transformField($optic, $transform)"
+      q"$builder.transformField($optic, $transform)"
     )
   }
 
@@ -194,20 +220,21 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     selector: c.Expr[B => T],
     default: c.Expr[T]
   )(schema: c.Expr[Schema[T]]): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[B, T](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[B, T](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
+    val tpe     = weakTypeOf[T]
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.mandateField[$T]($optic, $default)($schema)"
+      q"$builder.mandateField[$tpe]($optic, $default)($schema)"
     )
   }
 
   def optionalizeFieldImpl[A: WeakTypeTag, B: WeakTypeTag, T: WeakTypeTag](
     selector: c.Expr[A => T]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[A, T](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[A, T](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.optionalizeField($optic)"
+      q"$builder.optionalizeField($optic)"
     )
   }
 
@@ -215,10 +242,10 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     selector: c.Expr[A => Seq[T]],
     transform: c.Expr[DynamicSchemaExpr]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[A, Seq[T]](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[A, Seq[T]](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.transformElements($optic, $transform)"
+      q"$builder.transformElements($optic, $transform)"
     )
   }
 
@@ -226,10 +253,10 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     selector: c.Expr[A => Map[K, V]],
     transform: c.Expr[DynamicSchemaExpr]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[A, Map[K, V]](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[A, Map[K, V]](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.transformKeys($optic, $transform)"
+      q"$builder.transformKeys($optic, $transform)"
     )
   }
 
@@ -237,10 +264,10 @@ class MigrationBuilderSyntaxImpl(val c: blackbox.Context) {
     selector: c.Expr[A => Map[K, V]],
     transform: c.Expr[DynamicSchemaExpr]
   ): c.Expr[MigrationBuilder[A, B]] = {
-    val optic = selectorMacrosImpl.toOpticImpl[A, Map[K, V]](selector)
-    val builder = c.prefix.tree
+    val optic   = toOpticTree[A, Map[K, V]](selector)
+    val builder = unwrapBuilder(c.prefix.tree)
     c.Expr[MigrationBuilder[A, B]](
-      q"$builder.builder.transformValues($optic, $transform)"
+      q"$builder.transformValues($optic, $transform)"
     )
   }
 }

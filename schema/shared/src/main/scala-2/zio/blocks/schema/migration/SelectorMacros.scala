@@ -27,6 +27,9 @@ class SelectorMacrosImpl(val c: blackbox.Context) {
   import c.universe._
 
   def toOpticImpl[A: WeakTypeTag, B: WeakTypeTag](selector: c.Expr[A => B]): c.Expr[DynamicOptic] = {
+    // Use tags to avoid -Xfatal-warnings unused-parameter errors in Scala 2.
+    val _ = weakTypeOf[A]
+    val _ = weakTypeOf[B]
     val segments = extractPathSegments(selector.tree)
     buildDynamicOptic(segments)
   }
