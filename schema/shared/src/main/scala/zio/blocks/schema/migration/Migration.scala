@@ -2,25 +2,32 @@ package zio.blocks.schema.migration
 
 import zio.blocks.schema._
 
+import scala.util.control.NonFatal
+
 /**
  * A typed migration from type `A` to type `B`.
  *
  * [[Migration]] wraps a [[DynamicMigration]] with source and target schemas,
  * providing:
- *  - Type-safe application of migrations
- *  - Compile-time validation via macros
- *  - Composable migration chains
- *  - Reversibility (structural inverse)
+ *   - Type-safe application of migrations
+ *   - Compile-time validation via macros
+ *   - Composable migration chains
+ *   - Reversibility (structural inverse)
  *
- * The schemas are "structural schemas" - for old versions, these may be
- * derived from structural types that exist only at compile time, with no
- * runtime representation.
+ * The schemas are "structural schemas" - for old versions, these may be derived
+ * from structural types that exist only at compile time, with no runtime
+ * representation.
  *
- * @tparam A the source type
- * @tparam B the target type
- * @param dynamicMigration the underlying untyped migration
- * @param sourceSchema schema for the source type
- * @param targetSchema schema for the target type
+ * @tparam A
+ *   the source type
+ * @tparam B
+ *   the target type
+ * @param dynamicMigration
+ *   the underlying untyped migration
+ * @param sourceSchema
+ *   schema for the source type
+ * @param targetSchema
+ *   schema for the target type
  */
 final case class Migration[A, B](
   dynamicMigration: DynamicMigration,
@@ -32,15 +39,64 @@ final case class Migration[A, B](
    * Apply this migration to transform a value of type A to type B.
    */
   def apply(value: A): Either[MigrationError, B] = {
-    val dynamicValue = sourceSchema.toDynamicValue(value)
-    dynamicMigration(dynamicValue).flatMap { result =>
-      targetSchema.fromDynamicValue(result) match {
-        case Right(b) => Right(b)
-        case Left(schemaError) =>
-          Left(MigrationError.single(MigrationError.TransformFailed(
-            DynamicOptic.root,
-            s"Failed to convert result to target type: ${schemaError.getMessage}"
-          )))
+    val dynamicValueEither =
+      try Right(sourceSchema.toDynamicValue(value))
+      catch {
+        case _: UnsupportedOperationException =>
+          Left(
+            MigrationError.single(
+              MigrationError.TransformFailed(
+                DynamicOptic.root,
+                "Cannot apply typed migration to a structural source schema at runtime. Use `applyDynamic` with `DynamicValue` instead."
+              )
+            )
+          )
+        case NonFatal(e) =>
+          Left(
+            MigrationError.single(
+              MigrationError.TransformFailed(
+                DynamicOptic.root,
+                s"Failed to convert source value to DynamicValue: ${e.getMessage}"
+              )
+            )
+          )
+      }
+
+    dynamicValueEither.flatMap { dynamicValue =>
+      dynamicMigration(dynamicValue).flatMap { result =>
+        try {
+          targetSchema.fromDynamicValue(result) match {
+            case Right(b)          => Right(b)
+            case Left(schemaError) =>
+              Left(
+                MigrationError.single(
+                  MigrationError.TransformFailed(
+                    DynamicOptic.root,
+                    s"Failed to convert result to target type: ${schemaError.getMessage}"
+                  )
+                )
+              )
+          }
+        } catch {
+          case _: UnsupportedOperationException =>
+            Left(
+              MigrationError.single(
+                MigrationError.TransformFailed(
+                  DynamicOptic.root,
+                  "Cannot materialize a structural target schema at runtime. Use `applyDynamic` with `DynamicValue` instead."
+                )
+              )
+            )
+          case NonFatal(e) =>
+            Left(
+              MigrationError.single(
+                MigrationError.TransformFailed(
+                  DynamicOptic.root,
+                  s"Failed to convert result to target type: ${e.getMessage}"
+                )
+              )
+            )
+        }
       }
     }
   }
@@ -69,9 +125,9 @@ final case class Migration[A, B](
   /**
    * Get the structural reverse of this migration.
    *
-   * The reversed migration transforms from B back to A. Runtime correctness
-   * is best-effort - it depends on sufficient default values being available
-   * for reverse operations.
+   * The reversed migration transforms from B back to A. Runtime correctness is
+   * best-effort - it depends on sufficient default values being available for
+   * reverse operations.
    */
   def reverse: Migration[B, A] =
     new Migration(

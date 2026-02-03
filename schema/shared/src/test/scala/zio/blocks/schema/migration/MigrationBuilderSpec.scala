@@ -2,28 +2,32 @@ package zio.blocks.schema.migration
 
 import zio.blocks.schema._
 import zio.test._
-import zio.test.Assertion._
 
 object MigrationBuilderSpec extends SchemaBaseSpec {
-  
+
   case class PersonV1(firstName: String, lastName: String)
   object PersonV1 {
     implicit val schema: Schema[PersonV1] = Schema.derived
   }
-  
+
   case class PersonV2(fullName: String, age: Int)
   object PersonV2 {
     implicit val schema: Schema[PersonV2] = Schema.derived
   }
-  
+
   case class SimpleRecord(a: String, b: Int)
   object SimpleRecord {
     implicit val schema: Schema[SimpleRecord] = Schema.derived
   }
-  
+
   case class ExtendedRecord(a: String, b: Int, c: Boolean, d: Double)
   object ExtendedRecord {
     implicit val schema: Schema[ExtendedRecord] = Schema.derived
+  }
+
+  case class RecordWithDefault(a: String = "default", b: Int)
+  object RecordWithDefault {
+    implicit val schema: Schema[RecordWithDefault] = Schema.derived
   }
 
   def spec: Spec[TestEnvironment, Any] = suite("MigrationBuilderSpec")(
@@ -33,7 +37,7 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
           .addField(DynamicOptic.root.field("c"), true)
           .addField(DynamicOptic.root.field("d"), 3.14)
         val migration = builder.buildPartial
-        val result = migration(SimpleRecord("test", 42))
+        val result    = migration(SimpleRecord("test", 42))
         assertTrue(result.isRight)
       },
       test("adds a field with expression default") {
@@ -43,10 +47,14 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
             DynamicSchemaExpr.Literal(DynamicValue.Primitive(PrimitiveValue.String("default")))
           )
         val migration = builder.buildPartial
-        val result = migration.applyDynamic(DynamicValue.Record(Vector(
-          "a" -> DynamicValue.Primitive(PrimitiveValue.String("hello")),
-          "b" -> DynamicValue.Primitive(PrimitiveValue.Int(1))
-        )))
+        val result    = migration.applyDynamic(
+          DynamicValue.Record(
+            Vector(
+              "a" -> DynamicValue.Primitive(PrimitiveValue.String("hello")),
+              "b" -> DynamicValue.Primitive(PrimitiveValue.Int(1))
+            )
+          )
+        )
         assertTrue(result.isRight)
         result match {
           case Right(DynamicValue.Record(fields)) =>
@@ -61,12 +69,16 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
           .dropField(DynamicOptic.root.field("c"))
           .dropField(DynamicOptic.root.field("d"))
         val migration = builder.buildPartial
-        val result = migration.applyDynamic(DynamicValue.Record(Vector(
-          "a" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
-          "b" -> DynamicValue.Primitive(PrimitiveValue.Int(1)),
-          "c" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true)),
-          "d" -> DynamicValue.Primitive(PrimitiveValue.Double(1.5))
-        )))
+        val result    = migration.applyDynamic(
+          DynamicValue.Record(
+            Vector(
+              "a" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
+              "b" -> DynamicValue.Primitive(PrimitiveValue.Int(1)),
+              "c" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true)),
+              "d" -> DynamicValue.Primitive(PrimitiveValue.Double(1.5))
+            )
+          )
+        )
         result match {
           case Right(DynamicValue.Record(fields)) =>
             assertTrue(
@@ -83,10 +95,14 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
         val builder = MigrationBuilder[SimpleRecord, SimpleRecord]
           .renameField(DynamicOptic.root.field("a"), DynamicOptic.root.field("alpha"))
         val migration = builder.buildPartial
-        val result = migration.applyDynamic(DynamicValue.Record(Vector(
-          "a" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
-          "b" -> DynamicValue.Primitive(PrimitiveValue.Int(1))
-        )))
+        val result    = migration.applyDynamic(
+          DynamicValue.Record(
+            Vector(
+              "a" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
+              "b" -> DynamicValue.Primitive(PrimitiveValue.Int(1))
+            )
+          )
+        )
         result match {
           case Right(DynamicValue.Record(fields)) =>
             assertTrue(
@@ -109,16 +125,20 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
           .transformField(
             DynamicOptic.root.field("b"),
             DynamicSchemaExpr.Arithmetic(
-              DynamicSchemaExpr.Path(DynamicOptic.root),
+              DynamicSchemaExpr.Path(DynamicOptic.root.field("b")),
               DynamicSchemaExpr.Literal(DynamicValue.Primitive(PrimitiveValue.Int(10))),
               DynamicSchemaExpr.ArithmeticOperator.Add
             )
           )
         val migration = builder.buildPartial
-        val result = migration.applyDynamic(DynamicValue.Record(Vector(
-          "a" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
-          "b" -> DynamicValue.Primitive(PrimitiveValue.Int(5))
-        )))
+        val result    = migration.applyDynamic(
+          DynamicValue.Record(
+            Vector(
+              "a" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
+              "b" -> DynamicValue.Primitive(PrimitiveValue.Int(5))
+            )
+          )
+        )
         result match {
           case Right(DynamicValue.Record(fields)) =>
             val bValue = fields.find(_._1 == "b").map(_._2)
@@ -149,7 +169,7 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
           .changeFieldType(
             DynamicOptic.root.field("b"),
             DynamicSchemaExpr.CoercePrimitive(
-              DynamicSchemaExpr.Path(DynamicOptic.root),
+              DynamicSchemaExpr.Path(DynamicOptic.root.field("b")),
               "String"
             )
           )
@@ -168,14 +188,14 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
         val builder = MigrationBuilder[SimpleRecord, SimpleRecord]
           .renameCase("OldCase", "NewCase")
         val migration = builder.buildPartial
-        val action = migration.actions.head.asInstanceOf[MigrationAction.RenameCase]
+        val action    = migration.actions.head.asInstanceOf[MigrationAction.RenameCase]
         assertTrue(action.from == "OldCase" && action.to == "NewCase")
       },
       test("renames a case at specific path") {
         val builder = MigrationBuilder[SimpleRecord, SimpleRecord]
           .renameCaseAt(DynamicOptic.root.field("status"), "Active", "Enabled")
         val migration = builder.buildPartial
-        val action = migration.actions.head.asInstanceOf[MigrationAction.RenameCase]
+        val action    = migration.actions.head.asInstanceOf[MigrationAction.RenameCase]
         assertTrue(
           action.from == "Active",
           action.to == "Enabled",
@@ -188,7 +208,7 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
         val builder = MigrationBuilder[SimpleRecord, SimpleRecord]
           .transformCase("MyCase", _.renameField("old", "new"))
         val migration = builder.buildPartial
-        val action = migration.actions.head.asInstanceOf[MigrationAction.TransformCase]
+        val action    = migration.actions.head.asInstanceOf[MigrationAction.TransformCase]
         assertTrue(
           action.caseName == "MyCase",
           action.actions.length == 1
@@ -243,11 +263,19 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
         val migration = builder.buildPartial
         assertTrue(migration.actions.length == 2)
       },
-      test("build creates migration (same as buildPartial for now)") {
-        val builder = MigrationBuilder[SimpleRecord, SimpleRecord]
-          .renameField("a", "b")
+      test("build creates migration with validation") {
+        // Use buildPartial example that passes validation
+        val builder = MigrationBuilder[RecordWithDefault, RecordWithDefault]
+          .dropField(DynamicOptic.root.field("a"))
+          .addField(DynamicOptic.root.field("a"), DynamicSchemaExpr.DefaultValue)
         val migration = builder.build
-        assertTrue(migration.actions.length == 1)
+        assertTrue(migration.actions.length == 2)
+      },
+      test("build validates and throws on invalid migration") {
+        val builder = MigrationBuilder[SimpleRecord, SimpleRecord]
+          .renameField("a", "b") // Invalid: b already exists
+        val result = scala.util.Try(builder.build)
+        assertTrue(result.isFailure)
       }
     ),
     suite("Fluent chaining")(
@@ -278,9 +306,9 @@ object MigrationBuilderSpec extends SchemaBaseSpec {
         assertTrue(expr.isInstanceOf[DynamicSchemaExpr.Path])
       },
       test("exprs concat creates StringConcat expression") {
-        val left = MigrationBuilder.exprs.literal("hello")
+        val left  = MigrationBuilder.exprs.literal("hello")
         val right = MigrationBuilder.exprs.literal(" world")
-        val expr = MigrationBuilder.exprs.concat(left, right)
+        val expr  = MigrationBuilder.exprs.concat(left, right)
         assertTrue(expr.isInstanceOf[DynamicSchemaExpr.StringConcat])
       }
     )

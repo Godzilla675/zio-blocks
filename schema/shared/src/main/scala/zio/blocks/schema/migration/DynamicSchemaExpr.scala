@@ -6,8 +6,8 @@ import zio.blocks.schema._
  * A serializable expression that operates on [[DynamicValue]] values.
  *
  * Unlike [[SchemaExpr]], this is fully serializable and contains no runtime
- * type references, functions, or closures. It supports primitive-only operations
- * suitable for schema migrations.
+ * type references, functions, or closures. It supports primitive-only
+ * operations suitable for schema migrations.
  */
 sealed trait DynamicSchemaExpr { self =>
 
@@ -32,6 +32,77 @@ sealed trait DynamicSchemaExpr { self =>
 object DynamicSchemaExpr {
 
   /**
+   * Convert a typed [[SchemaExpr]] into a fully serializable [[DynamicSchemaExpr]].
+   *
+   * Notes:
+   *   - Only the subset of SchemaExpr operations supported by DynamicSchemaExpr can be converted.
+   *   - [[SchemaExpr.StringRegexMatch]] is currently not supported.
+   */
+  def fromSchemaExpr[A, B](expr: SchemaExpr[A, B]): Either[String, DynamicSchemaExpr] = expr match {
+    case SchemaExpr.Literal(value, schema) =>
+      Right(DynamicSchemaExpr.Literal(schema.toDynamicValue(value)))
+
+    case SchemaExpr.Optic(optic) =>
+      Right(DynamicSchemaExpr.Path(optic.toDynamic))
+
+    case SchemaExpr.Not(inner) =>
+      fromSchemaExpr(inner).map(DynamicSchemaExpr.Not(_))
+
+    case SchemaExpr.Logical(left, right, op) =>
+      for {
+        l <- fromSchemaExpr(left)
+        r <- fromSchemaExpr(right)
+      } yield {
+        val dynOp = op match {
+          case SchemaExpr.LogicalOperator.And => DynamicSchemaExpr.LogicalOperator.And
+          case SchemaExpr.LogicalOperator.Or  => DynamicSchemaExpr.LogicalOperator.Or
+        }
+        DynamicSchemaExpr.Logical(l, r, dynOp)
+      }
+
+    case SchemaExpr.Relational(left, right, op) =>
+      for {
+        l <- fromSchemaExpr(left)
+        r <- fromSchemaExpr(right)
+      } yield {
+        val dynOp = op match {
+          case SchemaExpr.RelationalOperator.LessThan           => DynamicSchemaExpr.RelationalOperator.LessThan
+          case SchemaExpr.RelationalOperator.LessThanOrEqual    => DynamicSchemaExpr.RelationalOperator.LessThanOrEqual
+          case SchemaExpr.RelationalOperator.GreaterThan        => DynamicSchemaExpr.RelationalOperator.GreaterThan
+          case SchemaExpr.RelationalOperator.GreaterThanOrEqual => DynamicSchemaExpr.RelationalOperator.GreaterThanOrEqual
+          case SchemaExpr.RelationalOperator.Equal              => DynamicSchemaExpr.RelationalOperator.Equal
+          case SchemaExpr.RelationalOperator.NotEqual           => DynamicSchemaExpr.RelationalOperator.NotEqual
+        }
+        DynamicSchemaExpr.Relational(l, r, dynOp)
+      }
+
+    case SchemaExpr.Arithmetic(left, right, op, _) =>
+      for {
+        l <- fromSchemaExpr(left)
+        r <- fromSchemaExpr(right)
+      } yield {
+        val dynOp = op match {
+          case SchemaExpr.ArithmeticOperator.Add      => DynamicSchemaExpr.ArithmeticOperator.Add
+          case SchemaExpr.ArithmeticOperator.Subtract => DynamicSchemaExpr.ArithmeticOperator.Subtract
+          case SchemaExpr.ArithmeticOperator.Multiply => DynamicSchemaExpr.ArithmeticOperator.Multiply
+        }
+        DynamicSchemaExpr.Arithmetic(l, r, dynOp)
+      }
+
+    case SchemaExpr.StringConcat(left, right) =>
+      for {
+        l <- fromSchemaExpr(left)
+        r <- fromSchemaExpr(right)
+      } yield DynamicSchemaExpr.StringConcat(l, r)
+
+    case _: SchemaExpr.StringRegexMatch[_] =>
+      Left("SchemaExpr.StringRegexMatch is not supported by DynamicSchemaExpr")
+
+    case SchemaExpr.StringLength(inner) =>
+      fromSchemaExpr(inner).map(DynamicSchemaExpr.StringLength(_))
+  }
+
+  /**
    * A literal constant value.
    */
   final case class Literal(value: DynamicValue) extends DynamicSchemaExpr {
@@ -49,8 +120,8 @@ object DynamicSchemaExpr {
   }
 
   /**
-   * Use the default value from the schema for the target field.
-   * This is a sentinel value that must be resolved at build time.
+   * Use the default value from the schema for the target field. This is a
+   * sentinel value that must be resolved at build time.
    */
   case object DefaultValue extends DynamicSchemaExpr {
     def eval(input: DynamicValue): Either[MigrationError, DynamicValue] =
@@ -73,9 +144,16 @@ object DynamicSchemaExpr {
         case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) =>
           Right(DynamicValue.Primitive(PrimitiveValue.Boolean(!b)))
         case other =>
-          Left(MigrationError.single(MigrationError.TypeConversionFailed(
-            DynamicOptic.root, getDynamicValueTypeName(other), "Boolean", "Expected a boolean for NOT operation"
-          )))
+          Left(
+            MigrationError.single(
+              MigrationError.TypeConversionFailed(
+                DynamicOptic.root,
+                getDynamicValueTypeName(other),
+                "Boolean",
+                "Expected a boolean for NOT operation"
+              )
+            )
+          )
       }
   }
 
@@ -95,20 +173,30 @@ object DynamicSchemaExpr {
   ) extends DynamicSchemaExpr {
     def eval(input: DynamicValue): Either[MigrationError, DynamicValue] =
       for {
-        l <- left.eval(input)
-        r <- right.eval(input)
+        l      <- left.eval(input)
+        r      <- right.eval(input)
         result <- (l, r) match {
-          case (DynamicValue.Primitive(PrimitiveValue.Boolean(lb)), DynamicValue.Primitive(PrimitiveValue.Boolean(rb))) =>
-            val res = operator match {
-              case LogicalOperator.And => lb && rb
-              case LogicalOperator.Or  => lb || rb
-            }
-            Right(DynamicValue.Primitive(PrimitiveValue.Boolean(res)))
-          case _ =>
-            Left(MigrationError.single(MigrationError.TypeConversionFailed(
-              DynamicOptic.root, "non-boolean", "Boolean", "Expected booleans for logical operation"
-            )))
-        }
+                    case (
+                          DynamicValue.Primitive(PrimitiveValue.Boolean(lb)),
+                          DynamicValue.Primitive(PrimitiveValue.Boolean(rb))
+                        ) =>
+                      val res = operator match {
+                        case LogicalOperator.And => lb && rb
+                        case LogicalOperator.Or  => lb || rb
+                      }
+                      Right(DynamicValue.Primitive(PrimitiveValue.Boolean(res)))
+                    case _ =>
+                      Left(
+                        MigrationError.single(
+                          MigrationError.TypeConversionFailed(
+                            DynamicOptic.root,
+                            "non-boolean",
+                            "Boolean",
+                            "Expected booleans for logical operation"
+                          )
+                        )
+                      )
+                  }
       } yield result
   }
 
@@ -135,7 +223,7 @@ object DynamicSchemaExpr {
         l <- left.eval(input)
         r <- right.eval(input)
       } yield {
-        val cmp = l.compare(r)
+        val cmp    = l.compare(r)
         val result = operator match {
           case RelationalOperator.LessThan           => cmp < 0
           case RelationalOperator.LessThanOrEqual    => cmp <= 0
@@ -165,16 +253,23 @@ object DynamicSchemaExpr {
   ) extends DynamicSchemaExpr {
     def eval(input: DynamicValue): Either[MigrationError, DynamicValue] =
       for {
-        l <- left.eval(input)
-        r <- right.eval(input)
+        l      <- left.eval(input)
+        r      <- right.eval(input)
         result <- (l, r) match {
-          case (DynamicValue.Primitive(lp), DynamicValue.Primitive(rp)) =>
-            evalPrimitiveArithmetic(lp, rp, operator)
-          case _ =>
-            Left(MigrationError.single(MigrationError.TypeConversionFailed(
-              DynamicOptic.root, "non-primitive", "numeric", "Expected primitives for arithmetic"
-            )))
-        }
+                    case (DynamicValue.Primitive(lp), DynamicValue.Primitive(rp)) =>
+                      evalPrimitiveArithmetic(lp, rp, operator)
+                    case _ =>
+                      Left(
+                        MigrationError.single(
+                          MigrationError.TypeConversionFailed(
+                            DynamicOptic.root,
+                            "non-primitive",
+                            "numeric",
+                            "Expected primitives for arithmetic"
+                          )
+                        )
+                      )
+                  }
       } yield result
   }
 
@@ -187,16 +282,26 @@ object DynamicSchemaExpr {
   ) extends DynamicSchemaExpr {
     def eval(input: DynamicValue): Either[MigrationError, DynamicValue] =
       for {
-        l <- left.eval(input)
-        r <- right.eval(input)
+        l      <- left.eval(input)
+        r      <- right.eval(input)
         result <- (l, r) match {
-          case (DynamicValue.Primitive(PrimitiveValue.String(ls)), DynamicValue.Primitive(PrimitiveValue.String(rs))) =>
-            Right(DynamicValue.Primitive(PrimitiveValue.String(ls + rs)))
-          case _ =>
-            Left(MigrationError.single(MigrationError.TypeConversionFailed(
-              DynamicOptic.root, "non-string", "String", "Expected strings for concatenation"
-            )))
-        }
+                    case (
+                          DynamicValue.Primitive(PrimitiveValue.String(ls)),
+                          DynamicValue.Primitive(PrimitiveValue.String(rs))
+                        ) =>
+                      Right(DynamicValue.Primitive(PrimitiveValue.String(ls + rs)))
+                    case _ =>
+                      Left(
+                        MigrationError.single(
+                          MigrationError.TypeConversionFailed(
+                            DynamicOptic.root,
+                            "non-string",
+                            "String",
+                            "Expected strings for concatenation"
+                          )
+                        )
+                      )
+                  }
       } yield result
   }
 
@@ -209,9 +314,16 @@ object DynamicSchemaExpr {
         case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
           Right(DynamicValue.Primitive(PrimitiveValue.Int(s.length)))
         case other =>
-          Left(MigrationError.single(MigrationError.TypeConversionFailed(
-            DynamicOptic.root, getDynamicValueTypeName(other), "String", "Expected string for length"
-          )))
+          Left(
+            MigrationError.single(
+              MigrationError.TypeConversionFailed(
+                DynamicOptic.root,
+                getDynamicValueTypeName(other),
+                "String",
+                "Expected string for length"
+              )
+            )
+          )
       }
   }
 
@@ -225,10 +337,17 @@ object DynamicSchemaExpr {
     def eval(input: DynamicValue): Either[MigrationError, DynamicValue] =
       expr.eval(input).flatMap {
         case DynamicValue.Primitive(pv) => coercePrimitive(pv, targetType)
-        case other =>
-          Left(MigrationError.single(MigrationError.TypeConversionFailed(
-            DynamicOptic.root, getDynamicValueTypeName(other), targetType, "Expected primitive"
-          )))
+        case other                      =>
+          Left(
+            MigrationError.single(
+              MigrationError.TypeConversionFailed(
+                DynamicOptic.root,
+                getDynamicValueTypeName(other),
+                targetType,
+                "Expected primitive"
+              )
+            )
+          )
       }
   }
 
@@ -244,8 +363,8 @@ object DynamicSchemaExpr {
   // Navigate into a DynamicValue using a DynamicOptic path
   private[migration] def navigateDynamicValue(value: DynamicValue, optic: DynamicOptic): Option[DynamicValue] = {
     var current = value
-    val nodes = optic.nodes
-    var idx = 0
+    val nodes   = optic.nodes
+    var idx     = 0
     while (idx < nodes.length) {
       nodes(idx) match {
         case DynamicOptic.Node.Field(name) =>
@@ -299,7 +418,7 @@ object DynamicSchemaExpr {
     left: PrimitiveValue,
     right: PrimitiveValue,
     op: ArithmeticOperator
-  ): Either[MigrationError, DynamicValue] = {
+  ): Either[MigrationError, DynamicValue] =
     (left, right) match {
       case (PrimitiveValue.Int(l), PrimitiveValue.Int(r)) =>
         val result = op match {
@@ -366,59 +485,62 @@ object DynamicSchemaExpr {
         Right(DynamicValue.Primitive(PrimitiveValue.BigDecimal(result)))
 
       case _ =>
-        Left(MigrationError.single(MigrationError.TypeConversionFailed(
-          DynamicOptic.root,
-          s"${left.getClass.getSimpleName}, ${right.getClass.getSimpleName}",
-          "compatible numeric types",
-          "Arithmetic requires matching numeric types"
-        )))
+        Left(
+          MigrationError.single(
+            MigrationError.TypeConversionFailed(
+              DynamicOptic.root,
+              s"${left.getClass.getSimpleName}, ${right.getClass.getSimpleName}",
+              "compatible numeric types",
+              "Arithmetic requires matching numeric types"
+            )
+          )
+        )
     }
-  }
 
   // Coerce a primitive value to a target type
   private def coercePrimitive(value: PrimitiveValue, targetType: String): Either[MigrationError, DynamicValue] = {
     def toInt: Either[MigrationError, Int] = value match {
-      case PrimitiveValue.Int(v)     => Right(v)
-      case PrimitiveValue.Long(v)    => Right(v.toInt)
-      case PrimitiveValue.Short(v)   => Right(v.toInt)
-      case PrimitiveValue.Byte(v)    => Right(v.toInt)
-      case PrimitiveValue.Double(v)  => Right(v.toInt)
-      case PrimitiveValue.Float(v)   => Right(v.toInt)
-      case PrimitiveValue.String(v)  => v.toIntOption.toRight(conversionError(value, targetType))
-      case _ => Left(conversionError(value, targetType))
+      case PrimitiveValue.Int(v)    => Right(v)
+      case PrimitiveValue.Long(v)   => Right(v.toInt)
+      case PrimitiveValue.Short(v)  => Right(v.toInt)
+      case PrimitiveValue.Byte(v)   => Right(v.toInt)
+      case PrimitiveValue.Double(v) => Right(v.toInt)
+      case PrimitiveValue.Float(v)  => Right(v.toInt)
+      case PrimitiveValue.String(v) => v.toIntOption.toRight(conversionError(value, targetType))
+      case _                        => Left(conversionError(value, targetType))
     }
 
     def toLong: Either[MigrationError, Long] = value match {
-      case PrimitiveValue.Long(v)    => Right(v)
-      case PrimitiveValue.Int(v)     => Right(v.toLong)
-      case PrimitiveValue.Short(v)   => Right(v.toLong)
-      case PrimitiveValue.Byte(v)    => Right(v.toLong)
-      case PrimitiveValue.Double(v)  => Right(v.toLong)
-      case PrimitiveValue.Float(v)   => Right(v.toLong)
-      case PrimitiveValue.String(v)  => v.toLongOption.toRight(conversionError(value, targetType))
-      case _ => Left(conversionError(value, targetType))
+      case PrimitiveValue.Long(v)   => Right(v)
+      case PrimitiveValue.Int(v)    => Right(v.toLong)
+      case PrimitiveValue.Short(v)  => Right(v.toLong)
+      case PrimitiveValue.Byte(v)   => Right(v.toLong)
+      case PrimitiveValue.Double(v) => Right(v.toLong)
+      case PrimitiveValue.Float(v)  => Right(v.toLong)
+      case PrimitiveValue.String(v) => v.toLongOption.toRight(conversionError(value, targetType))
+      case _                        => Left(conversionError(value, targetType))
     }
 
     def toDouble: Either[MigrationError, Double] = value match {
-      case PrimitiveValue.Double(v)  => Right(v)
-      case PrimitiveValue.Float(v)   => Right(v.toDouble)
-      case PrimitiveValue.Int(v)     => Right(v.toDouble)
-      case PrimitiveValue.Long(v)    => Right(v.toDouble)
-      case PrimitiveValue.Short(v)   => Right(v.toDouble)
-      case PrimitiveValue.Byte(v)    => Right(v.toDouble)
-      case PrimitiveValue.String(v)  => v.toDoubleOption.toRight(conversionError(value, targetType))
-      case _ => Left(conversionError(value, targetType))
+      case PrimitiveValue.Double(v) => Right(v)
+      case PrimitiveValue.Float(v)  => Right(v.toDouble)
+      case PrimitiveValue.Int(v)    => Right(v.toDouble)
+      case PrimitiveValue.Long(v)   => Right(v.toDouble)
+      case PrimitiveValue.Short(v)  => Right(v.toDouble)
+      case PrimitiveValue.Byte(v)   => Right(v.toDouble)
+      case PrimitiveValue.String(v) => v.toDoubleOption.toRight(conversionError(value, targetType))
+      case _                        => Left(conversionError(value, targetType))
     }
 
     def toFloat: Either[MigrationError, Float] = value match {
-      case PrimitiveValue.Float(v)   => Right(v)
-      case PrimitiveValue.Double(v)  => Right(v.toFloat)
-      case PrimitiveValue.Int(v)     => Right(v.toFloat)
-      case PrimitiveValue.Long(v)    => Right(v.toFloat)
-      case PrimitiveValue.Short(v)   => Right(v.toFloat)
-      case PrimitiveValue.Byte(v)    => Right(v.toFloat)
-      case PrimitiveValue.String(v)  => v.toFloatOption.toRight(conversionError(value, targetType))
-      case _ => Left(conversionError(value, targetType))
+      case PrimitiveValue.Float(v)  => Right(v)
+      case PrimitiveValue.Double(v) => Right(v.toFloat)
+      case PrimitiveValue.Int(v)    => Right(v.toFloat)
+      case PrimitiveValue.Long(v)   => Right(v.toFloat)
+      case PrimitiveValue.Short(v)  => Right(v.toFloat)
+      case PrimitiveValue.Byte(v)   => Right(v.toFloat)
+      case PrimitiveValue.String(v) => v.toFloatOption.toRight(conversionError(value, targetType))
+      case _                        => Left(conversionError(value, targetType))
     }
 
     def toString_ : Either[MigrationError, String] = value match {
@@ -433,14 +555,14 @@ object DynamicSchemaExpr {
       case PrimitiveValue.Char(v)       => Right(v.toString)
       case PrimitiveValue.BigInt(v)     => Right(v.toString)
       case PrimitiveValue.BigDecimal(v) => Right(v.toString)
-      case _ => Left(conversionError(value, targetType))
+      case _                            => Left(conversionError(value, targetType))
     }
 
     def toBoolean: Either[MigrationError, Boolean] = value match {
       case PrimitiveValue.Boolean(v) => Right(v)
       case PrimitiveValue.String(v)  => v.toBooleanOption.toRight(conversionError(value, targetType))
       case PrimitiveValue.Int(v)     => Right(v != 0)
-      case _ => Left(conversionError(value, targetType))
+      case _                         => Left(conversionError(value, targetType))
     }
 
     targetType match {
@@ -455,10 +577,12 @@ object DynamicSchemaExpr {
   }
 
   private def conversionError(value: PrimitiveValue, targetType: String): MigrationError =
-    MigrationError.single(MigrationError.TypeConversionFailed(
-      DynamicOptic.root,
-      value.getClass.getSimpleName,
-      targetType,
-      "Conversion not supported"
-    ))
+    MigrationError.single(
+      MigrationError.TypeConversionFailed(
+        DynamicOptic.root,
+        value.getClass.getSimpleName,
+        targetType,
+        "Conversion not supported"
+      )
+    )
 }

@@ -8,7 +8,8 @@ import scala.util.control.NoStackTrace
  * An error that occurred during a migration operation.
  *
  * All errors capture path information via [[DynamicOptic]] to enable
- * diagnostics such as "Failed to apply TransformValue at .addresses.each.streetNumber".
+ * diagnostics such as "Failed to apply TransformValue at
+ * .addresses.each.streetNumber".
  */
 final case class MigrationError(errors: ::[MigrationError.Single]) extends Exception with NoStackTrace {
   def ++(other: MigrationError): MigrationError =
