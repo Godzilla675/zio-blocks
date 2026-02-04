@@ -558,21 +558,21 @@ object MigrationSchemas {
         stringLengthSchema.reflect.asTerm("StringLength"),
         coercePrimitiveSchema.reflect.asTerm("CoercePrimitive")
       ),
-      typeName = TypeName(Namespace(migrationPkg), "DynamicSchemaExpr"),
+      typeName = TypeName(Namespace(migrationPkg, List("DynamicSchemaExpr")), "DynamicSchemaExpr"),
       variantBinding = new Binding.Variant(
         discriminator = new Discriminator[DynamicSchemaExpr] {
           def discriminate(a: DynamicSchemaExpr): Int = a match {
-            case _: DynamicSchemaExpr.Literal                => 0
-            case _: DynamicSchemaExpr.Path                   => 1
-            case DynamicSchemaExpr.DefaultValue              => 2
-            case _: DynamicSchemaExpr.ResolvedDefault        => 3
-            case _: DynamicSchemaExpr.Not                    => 4
-            case _: DynamicSchemaExpr.Logical                => 5
-            case _: DynamicSchemaExpr.Relational             => 6
-            case _: DynamicSchemaExpr.Arithmetic             => 7
-            case _: DynamicSchemaExpr.StringConcat           => 8
-            case _: DynamicSchemaExpr.StringLength           => 9
-            case _: DynamicSchemaExpr.CoercePrimitive        => 10
+            case _: DynamicSchemaExpr.Literal         => 0
+            case _: DynamicSchemaExpr.Path            => 1
+            case DynamicSchemaExpr.DefaultValue       => 2
+            case _: DynamicSchemaExpr.ResolvedDefault => 3
+            case _: DynamicSchemaExpr.Not             => 4
+            case _: DynamicSchemaExpr.Logical         => 5
+            case _: DynamicSchemaExpr.Relational      => 6
+            case _: DynamicSchemaExpr.Arithmetic      => 7
+            case _: DynamicSchemaExpr.StringConcat    => 8
+            case _: DynamicSchemaExpr.StringLength    => 9
+            case _: DynamicSchemaExpr.CoercePrimitive => 10
           }
         },
         matchers = Matchers(
@@ -860,12 +860,12 @@ object MigrationSchemas {
         constructor = new Constructor[MigrationAction.Join] {
           def usedRegisters: RegisterOffset                                    = 4
           def construct(in: Registers, offset: RegisterOffset): MigrationAction.Join =
-            MigrationAction.Join(
-              in.getObject(offset + 0).asInstanceOf[DynamicOptic],
-              in.getObject(offset + 1).asInstanceOf[Vector[DynamicOptic]],
-              in.getObject(offset + 2).asInstanceOf[DynamicSchemaExpr],
-              in.getObject(offset + 3).asInstanceOf[DynamicSchemaExpr]
-            )
+              MigrationAction.Join(
+                in.getObject(offset + 0).asInstanceOf[DynamicOptic],
+                in.getObject(offset + 1).asInstanceOf[Vector[DynamicOptic]],
+                in.getObject(offset + 2).asInstanceOf[DynamicSchemaExpr],
+                in.getObject(offset + 3).asInstanceOf[DynamicSchemaExpr]
+              )
         },
         deconstructor = new Deconstructor[MigrationAction.Join] {
           def usedRegisters: RegisterOffset = 4
