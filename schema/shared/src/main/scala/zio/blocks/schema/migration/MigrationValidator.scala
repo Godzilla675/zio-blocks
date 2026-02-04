@@ -310,9 +310,96 @@ object MigrationValidator {
       // These actions don't change structure, just values
       case _: MigrationAction.TransformValue    => Right(structure)
       case _: MigrationAction.ChangeType        => Right(structure)
-      case _: MigrationAction.Join              => Right(structure)
-      case _: MigrationAction.Split             => Right(structure)
       case _: MigrationAction.TransformCase     => Right(structure)
+
+      case MigrationAction.Join(targetPath, sourcePaths, _, _) =>
+        // Join removes source fields and adds a target field
+        val afterDrops = sourcePaths.foldLeft[Either[String, SchemaStructure]](Right(structure)) {
+          (current, sourcePath) =>
+            current.flatMap { s =>
+              val (parentPath, fieldNameOpt) = sourcePath.dropLastField
+              fieldNameOpt match {
+                case Some(fieldName) =>
+                  modifyAtPath(s, parentPath) {
+                    case r: SchemaStructure.Record =>
+                      if (!r.fields.contains(fieldName)) {
+                        Left(s"Join source field '$fieldName' does not exist")
+                      } else {
+                        Right(r.copy(
+                          fields = r.fields - fieldName,
+                          isOptional = r.isOptional - fieldName
+                        ))
+                      }
+                    case other =>
+                      Left(s"Cannot drop join source from non-record: ${describeStructure(other)}")
+                  }
+                case None =>
+                  Left("Join source path must end in a field")
+              }
+            }
+        }
+        // Add the target field
+        afterDrops.flatMap { s =>
+          val (parentPath, fieldNameOpt) = targetPath.dropLastField
+          fieldNameOpt match {
+            case Some(fieldName) =>
+              modifyAtPath(s, parentPath) {
+                case r: SchemaStructure.Record =>
+                  Right(r.copy(
+                    fields = r.fields + (fieldName -> SchemaStructure.Dynamic),
+                    isOptional = r.isOptional + (fieldName -> false)
+                  ))
+                case other =>
+                  Left(s"Cannot add join target to non-record: ${describeStructure(other)}")
+              }
+            case None =>
+              Left("Join target path must end in a field")
+          }
+        }
+
+      case MigrationAction.Split(sourcePath, targetPaths, _, _) =>
+        // Split removes source field and adds target fields
+        val (sourceParentPath, sourceFieldNameOpt) = sourcePath.dropLastField
+        val afterDrop = sourceFieldNameOpt match {
+          case Some(fieldName) =>
+            modifyAtPath(structure, sourceParentPath) {
+              case r: SchemaStructure.Record =>
+                if (!r.fields.contains(fieldName)) {
+                  Left(s"Split source field '$fieldName' does not exist")
+                } else {
+                  Right(r.copy(
+                    fields = r.fields - fieldName,
+                    isOptional = r.isOptional - fieldName
+                  ))
+                }
+              case other =>
+                Left(s"Cannot drop split source from non-record: ${describeStructure(other)}")
+            }
+          case None =>
+            Left("Split source path must end in a field")
+        }
+        // Add all target fields
+        afterDrop.flatMap { s =>
+          targetPaths.foldLeft[Either[String, SchemaStructure]](Right(s)) { (current, targetPath) =>
+            current.flatMap { struct =>
+              val (parentPath, fieldNameOpt) = targetPath.dropLastField
+              fieldNameOpt match {
+                case Some(fieldName) =>
+                  modifyAtPath(struct, parentPath) {
+                    case r: SchemaStructure.Record =>
+                      Right(r.copy(
+                        fields = r.fields + (fieldName -> SchemaStructure.Dynamic),
+                        isOptional = r.isOptional + (fieldName -> false)
+                      ))
+                    case other =>
+                      Left(s"Cannot add split target to non-record: ${describeStructure(other)}")
+                  }
+                case None =>
+                  Left("Split target path must end in a field")
+              }
+            }
+          }
+        }
       case _: MigrationAction.TransformElements => Right(structure)
       case _: MigrationAction.TransformKeys     => Right(structure)
       case _: MigrationAction.TransformValues   => Right(structure)
