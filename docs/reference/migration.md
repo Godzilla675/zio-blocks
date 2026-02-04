@@ -114,8 +114,8 @@ Migration
   .dropField(path, defaultForReverse)
   .renameField(fromPath, toPath)
   .transformField(path, transform, reverseTransform)
-  .mandate(path, default)
-  .optionalize(path)
+  .mandateField(path, default)
+  .optionalizeField(path)
   .changeType(path, converter, reverseConverter)
   .joinFields(targetPath, sourcePaths, combiner, splitter)
   .splitField(sourcePath, targetPaths, splitter, combiner)
@@ -202,8 +202,10 @@ migration.apply(value) match {
 ```
 
 Error types include:
-- `PathNotFound` - The path doesn't exist in the value
-- `TypeMismatch` - Expected a different type at a path
+- `FieldNotFound` - A required field was not found in the source value
+- `FieldAlreadyExists` - A field already exists when trying to add it
+- `NotARecord` - Expected a record but found a different kind of value
+- `NotAVariant` - Expected a variant but found a different kind of value
 - `TypeConversionFailed` - Primitive type conversion failed
 - `DefaultValueMissing` - Default value not resolved
 - `PathNavigationFailed` - Cannot navigate the path
