@@ -86,10 +86,8 @@ object DeriveGenExample extends App {
           D.instance(field.value.metadata).asInstanceOf[Lazy[Gen[Any]]]
         }
 
-        // Build Reflect.Record to access registers and constructor
         val recordFields  = fields.asInstanceOf[IndexedSeq[Term[Binding, A, _]]]
-        val recordBinding = binding
-        val recordReflect = new Reflect.Record[Binding, A](recordFields, typeId, recordBinding, doc, modifiers)
+        val recordReflect = new Reflect.Record[Binding, A](recordFields, typeId, binding, doc, modifiers)
 
         new Gen[A] {
           def generate(random: Random): A = {
@@ -103,7 +101,7 @@ object DeriveGenExample extends App {
             }
 
             // Construct the record from registers
-            recordBinding.constructor.construct(registers, RegisterOffset.Zero)
+            binding.constructor.construct(registers, RegisterOffset.Zero)
           }
         }
       }
@@ -153,8 +151,7 @@ object DeriveGenExample extends App {
       examples: Seq[C[A]]
     )(implicit F: HasBinding[F], D: DeriveGen.HasInstance[F]): Lazy[Gen[C[A]]] = Lazy {
       val elementGen   = D.instance(element.metadata)
-      val seqBinding   = binding
-      val constructor  = seqBinding.constructor
+      val constructor  = binding.constructor
       val elemClassTag = element.typeId.classTag.asInstanceOf[ClassTag[A]]
 
       new Gen[C[A]] {
@@ -193,8 +190,7 @@ object DeriveGenExample extends App {
     )(implicit F: HasBinding[F], D: DeriveGen.HasInstance[F]): Lazy[Gen[M[K, V]]] = Lazy {
       val keyGen      = D.instance(key.metadata)
       val valueGen    = D.instance(value.metadata)
-      val mapBinding  = binding
-      val constructor = mapBinding.constructor
+      val constructor = binding.constructor
 
       new Gen[M[K, V]] {
         def generate(random: Random): M[K, V] = {
@@ -280,12 +276,11 @@ object DeriveGenExample extends App {
       defaultValue: Option[A],
       examples: Seq[A]
     )(implicit F: HasBinding[F], D: DeriveGen.HasInstance[F]): Lazy[Gen[A]] = Lazy {
-      val wrappedGen     = D.instance(wrapped.metadata)
-      val wrapperBinding = binding
+      val wrappedGen = D.instance(wrapped.metadata)
 
       new Gen[A] {
         def generate(random: Random): A =
-          wrapperBinding.wrap(wrappedGen.force.generate(random))
+          binding.wrap(wrappedGen.force.generate(random))
       }
     }
   }

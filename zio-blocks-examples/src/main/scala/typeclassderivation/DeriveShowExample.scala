@@ -60,14 +60,8 @@ object DeriveShowExample extends App {
           (fieldName, fieldShowInstance)
         }
 
-        // Cast fields to use Binding as F (we are going to create Reflect.Record with Binding as F)
-        val recordFields = fields.asInstanceOf[IndexedSeq[Term[Binding, A, _]]]
-
-        // Cast to Binding.Record to access constructor/deconstructor
-        val recordBinding = binding
-
-        // Build a Reflect.Record to get access to the computed registers for each field
-        val recordReflect = new Reflect.Record[Binding, A](recordFields, typeId, recordBinding, doc, modifiers)
+        val recordFields  = fields.asInstanceOf[IndexedSeq[Term[Binding, A, _]]]
+        val recordReflect = new Reflect.Record[Binding, A](recordFields, typeId, binding, doc, modifiers)
 
         new Show[A] {
           def show(value: A): String = {
@@ -76,7 +70,7 @@ object DeriveShowExample extends App {
             val registers = Registers(recordReflect.usedRegisters)
 
             // Deconstruct field values of the record into the registers
-            recordBinding.deconstructor.deconstruct(registers, RegisterOffset.Zero, value)
+            binding.deconstructor.deconstruct(registers, RegisterOffset.Zero, value)
 
             // Build string representations for all fields
             val fieldStrings = fields.indices.map { i =>
@@ -105,10 +99,8 @@ object DeriveShowExample extends App {
         D.instance(case_.value.metadata).asInstanceOf[Lazy[Show[Any]]]
       }
 
-      // Cast binding to Binding.Variant to access discriminator and matchers
-      val variantBinding = binding
-      val discriminator  = variantBinding.discriminator
-      val matchers       = variantBinding.matchers
+      val discriminator = binding.discriminator
+      val matchers      = binding.matchers
 
       new Show[A] {
         // Implement show by using discriminator and matchers to find the right case
@@ -138,9 +130,7 @@ object DeriveShowExample extends App {
       // Get Show instance for element type LAZILY
       val elementShowLazy: Lazy[Show[A]] = D.instance(element.metadata)
 
-      // Cast binding to Binding.Seq to access the deconstructor
-      val seqBinding    = binding
-      val deconstructor = seqBinding.deconstructor
+      val deconstructor = binding.deconstructor
 
       new Show[C[A]] {
         def show(value: C[A]): String = {
@@ -167,9 +157,7 @@ object DeriveShowExample extends App {
       val keyShowLazy: Lazy[Show[K]]   = D.instance(key.metadata)
       val valueShowLazy: Lazy[Show[V]] = D.instance(value.metadata)
 
-      // Cast binding to Binding.Map to access the deconstructor
-      val mapBinding    = binding
-      val deconstructor = mapBinding.deconstructor
+      val deconstructor = binding.deconstructor
 
       new Show[M[K, V]] {
         def show(m: M[K, V]): String = {
@@ -235,12 +223,9 @@ object DeriveShowExample extends App {
       // Get Show instance for the wrapped (underlying) type B LAZILY
       val wrappedShowLazy: Lazy[Show[B]] = D.instance(wrapped.metadata)
 
-      // Cast binding to Binding.Wrapper to access unwrap function
-      val wrapperBinding = binding
-
       new Show[A] {
         def show(value: A): String = {
-          val unwrapped = wrapperBinding.unwrap(value)
+          val unwrapped = binding.unwrap(value)
           s"${typeId.name}(${wrappedShowLazy.force.show(unwrapped)})"
         }
       }
