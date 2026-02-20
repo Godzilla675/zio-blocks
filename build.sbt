@@ -531,3 +531,32 @@ lazy val docs = project
     mediatype.jvm
   )
   .enablePlugins(WebsitePlugin)
+
+import zio.sbt.githubactions._
+
+import zio.sbt.githubactions.Step
+
+
+ThisBuild / ciJvmOptions := Seq("-Djava.locale.providers=CLDR,JRE", "-XX:+PrintCommandLineFlags")
+
+ThisBuild / ciPostReleaseJobs := {
+  import zio.sbt.githubactions._
+
+  def updateStep(step: Step): Step = step match {
+    case s: Step.SingleStep if s.name == "Publish Docs to NPM Registry" =>
+      s.copy(env = s.env + ("NODE_AUTH_TOKEN" -> "${{ secrets.NPM_TOKEN }}"))
+    case s: Step.StepSequence =>
+      val updatedSteps = s.steps.map(updateStep)
+      s.copy(steps = updatedSteps)
+    case other => other
+  }
+
+  (ThisBuild / ciPostReleaseJobs).value.map { job =>
+    if (job.id == "release-docs") {
+      val updatedSteps = job.steps.map(updateStep)
+      job.copy(steps = updatedSteps)
+    } else {
+      job
+    }
+  }
+}
