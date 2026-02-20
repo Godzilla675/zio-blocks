@@ -30,6 +30,7 @@ addCommandAlias("build", "; fmt; coverage; root/test; coverageReport")
 addCommandAlias("fmt", "all root/scalafmtSbt root/scalafmtAll")
 addCommandAlias("fmtCheck", "all root/scalafmtSbtCheck root/scalafmtCheckAll")
 addCommandAlias("check", "; scalafmtSbtCheck; scalafmtCheckAll")
+addCommandAlias("lint", "check")
 addCommandAlias("mimaChecks", "all schemaJVM/mimaReportBinaryIssues")
 addCommandAlias(
   "testJVM",
@@ -54,6 +55,7 @@ lazy val root = project
   .settings(
     publish / skip := true
   )
+  .enablePlugins(ZioSbtCiPlugin)
   .aggregate(
     typeid.jvm,
     typeid.js,
@@ -492,6 +494,7 @@ lazy val examples = project
   .settings(
     publish / skip := true
   )
+  .enablePlugins(ZioSbtCiPlugin)
   .dependsOn(
     schema.jvm,
     markdown.jvm,
