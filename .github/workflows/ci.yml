@@ -3,7 +3,7 @@
 
 name: CI
 env:
-  JDK_JAVA_OPTIONS: -XX:+PrintCommandLineFlags -Djava.locale.providers=CLDR,JRE -XX:+PrintCommandLineFlags
+  JDK_JAVA_OPTIONS: -XX:+PrintCommandLineFlags -Djava.locale.providers=CLDR,JRE
 'on':
   workflow_dispatch: {}
   release:

@@ -537,7 +537,7 @@ import zio.sbt.githubactions._
 import zio.sbt.githubactions.Step
 
 
-ThisBuild / ciJvmOptions := Seq("-Djava.locale.providers=CLDR,JRE", "-XX:+PrintCommandLineFlags")
+ThisBuild / ciJvmOptions := Seq("-Djava.locale.providers=CLDR,JRE")
 
 ThisBuild / ciPostReleaseJobs := {
   import zio.sbt.githubactions._
